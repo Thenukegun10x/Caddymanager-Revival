@@ -243,8 +243,8 @@ exports.changePassword = async (req, res) => {
       });
     }
     
-    // Update password
-    await userRepository.findByIdAndUpdate(user.id || user._id, { password: newPassword });
+    // Update password (handles hashing internally based on database type)
+    await userRepository.updatePassword(user.id || user._id, newPassword);
     
     // Log password change
     await auditService.logAction({
