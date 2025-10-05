@@ -1,17 +1,24 @@
 const metricsService = require('../services/metricsService')
 const catchAsync = require('../utils/catchAsync')
 
-/**
+ /**
  * @openapi
- * /metrics:
+ * /metrics/prometheus:
  *   get:
- *     summary: Get aggregated metrics
+ *     summary: Prometheus exposition format for key metrics
  *     tags:
  *       - Metrics
+ *     parameters:
+ *       - in: query
+ *         name: detailed
+ *         schema:
+ *           type: string
+ *         description: If set to 1, include per-config and per-server metrics (may increase cardinality)
  *     responses:
  *       200:
- *         description: Aggregated metrics envelope
+ *         description: Prometheus text format
  */
+
 const getMetrics = catchAsync(async (req, res) => {
   const data = await metricsService.getAllMetrics()
   res.status(200).json({ success: true, data })
@@ -77,12 +84,12 @@ const getConfigs = catchAsync(async (req, res) => {
  *         name: limit
  *         schema:
  *           type: integer
- *         description: Limit the number of historical entries returned (default: all)
+ *         description: Limit the number of historical entries returned (default all)
  *       - in: query
  *         name: fields
  *         schema:
  *           type: string
- *         description: Comma-separated list of fields to include (e.g., "servers,configs")
+ *         description: Comma-separated list of fields to include (e.g. servers,configs)
  *     responses:
  *       200:
  *         description: Array of compact metric snapshots
@@ -119,7 +126,14 @@ const getHistory = catchAsync(async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *           enum: [servers.online, servers.total, configs.total, configs.domains, app.heapUsed, app.loadAverage, app.memoryUsagePercent]
+ *           enum: 
+ *             - servers.online
+ *             - servers.total
+ *             - configs.total
+ *             - configs.domains
+ *             - app.heapUsed
+ *             - app.loadAverage
+ *             - app.memoryUsagePercent
  *         description: The metric series to retrieve
  *     responses:
  *       200:
