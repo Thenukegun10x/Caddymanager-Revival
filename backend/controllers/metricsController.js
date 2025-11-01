@@ -77,7 +77,7 @@ const getConfigs = catchAsync(async (req, res) => {
  *         name: limit
  *         schema:
  *           type: integer
- *         description: Limit the number of historical entries returned (default: all)
+ *         description: "Limit the number of historical entries returned (default: all)"
  *       - in: query
  *         name: fields
  *         schema:
