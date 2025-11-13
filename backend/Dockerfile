@@ -29,7 +29,7 @@ RUN npm ci && chown -R node:node /usr/src/node-app
 
 # Install build dependencies so native modules can be compiled inside the image
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev && \
+    apt-get install -y --no-install-recommends build-essential libcurl4 python3 libsqlite3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Force native modules to build from source inside this image so binaries are
