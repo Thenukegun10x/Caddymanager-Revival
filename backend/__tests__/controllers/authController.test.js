@@ -169,6 +169,44 @@ describe('AuthController', () => {
       expect(response.body.success).toBe(false);
       expect(response.body.message).toBe('Current password is incorrect');
     });
+
+    it('should allow login with new password after password change', async () => {
+      // First change the password
+      const changeResponse = await request(app)
+        .put('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          currentPassword: 'password123',
+          newPassword: 'newpassword123'
+        });
+
+      expect(changeResponse.status).toBe(200);
+      expect(changeResponse.body.success).toBe(true);
+
+      // Then try to login with the new password
+      const loginResponse = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          username: 'testuser',
+          password: 'newpassword123'
+        });
+
+      expect(loginResponse.status).toBe(200);
+      expect(loginResponse.body.success).toBe(true);
+      expect(loginResponse.body.token).toBeDefined();
+      expect(loginResponse.body.user.username).toBe('testuser');
+
+      // Verify old password no longer works
+      const oldPasswordResponse = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          username: 'testuser',
+          password: 'password123'
+        });
+
+      expect(oldPasswordResponse.status).toBe(401);
+      expect(oldPasswordResponse.body.success).toBe(false);
+    });
   });
 
   describe('Admin Routes', () => {

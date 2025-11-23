@@ -216,6 +216,11 @@ const UserSQLiteModel = {
 		return await bcrypt.compare(candidatePassword, hashedPassword);
 	},
 
+	async hashPassword(password) {
+		const salt = await bcrypt.genSalt(10);
+		return bcrypt.hash(password, salt);
+	},
+
 	// Instance-like methods for compatibility
 	async saveUser(userObj) {
 		if (userObj.id) {

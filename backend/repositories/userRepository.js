@@ -164,6 +164,27 @@ const userRepository = {
     return UserModel.comparePassword(candidatePassword, hashedPassword);
   },
 
+  async hashPassword(password) {
+    if (isMongoose()) {
+      // For Mongoose, manually hash password using bcrypt
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      return bcrypt.hash(password, salt);
+    }
+    // SQLite
+    return UserModel.hashPassword(password);
+  },
+
+  async updatePassword(id, newPassword) {
+    if (isMongoose()) {
+      // For Mongoose, we need to hash the password manually since findByIdAndUpdate bypasses pre-save hooks
+      const hashedPassword = await this.hashPassword(newPassword);
+      return UserModel.findByIdAndUpdate(id, { password: hashedPassword }, { new: true }).lean();
+    }
+    // For SQLite, the model handles password hashing automatically in findByIdAndUpdate
+    return UserModel.findByIdAndUpdate(id, { password: newPassword }, { returnUpdatedDoc: true });
+  },
+
   async saveUser(userObj) {
     if (isMongoose()) {
       // For Mongoose, we need to work with the actual model instance
