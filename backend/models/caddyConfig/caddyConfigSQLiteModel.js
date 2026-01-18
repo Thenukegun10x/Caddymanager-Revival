@@ -13,7 +13,9 @@ function ensureTable() {
 			servers TEXT NOT NULL,
 			name TEXT NOT NULL,
 			format TEXT NOT NULL DEFAULT 'json',
-			jsonConfig TEXT NOT NULL,
+			jsonConfig TEXT,
+			caddyfilePath TEXT,
+			caddyfileContent TEXT,
 			status TEXT NOT NULL DEFAULT 'draft',
 			metadata TEXT,
 			history TEXT,
@@ -27,6 +29,20 @@ function ensureTable() {
 		} catch (err) {
 			// Column already exists or other error, ignore
 		}
+
+		// Add caddyfile columns if they don't exist (defensive migration)
+		try {
+			dbInstance.prepare(`ALTER TABLE caddy_configs ADD COLUMN caddyfilePath TEXT`).run();
+		} catch (err) {
+			// ignore
+		}
+
+		try {
+			dbInstance.prepare(`ALTER TABLE caddy_configs ADD COLUMN caddyfileContent TEXT`).run();
+		} catch (err) {
+			// ignore
+		}
+		
 	} catch (error) {
 		console.error('Error ensuring caddy_configs table:', error.message);
 	}
@@ -39,13 +55,15 @@ const CaddyConfigSQLiteModel = {
 		const db = getDB();
 		const now = new Date();
 		const stmt = db.prepare(`INSERT INTO caddy_configs (
-			servers, name, format, jsonConfig, status, metadata, history, createdAt, updatedAt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+			servers, name, format, jsonConfig, caddyfilePath, caddyfileContent, status, metadata, history, createdAt, updatedAt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 		const info = stmt.run(
 			JSON.stringify(config.servers || []),
 			config.name,
 			config.format || 'json',
-			JSON.stringify(config.jsonConfig),
+			JSON.stringify(config.jsonConfig || {}),
+			config.caddyfilePath || null,
+			config.caddyfileContent || null,
 			config.status || 'draft',
 			JSON.stringify(config.metadata || {}),
 			JSON.stringify(config.history || []),
@@ -171,6 +189,8 @@ const CaddyConfigSQLiteModel = {
 			id: String(row.id), // Convert id to string for consistency
 			servers: row.servers ? JSON.parse(row.servers) : [],
 			jsonConfig: row.jsonConfig ? JSON.parse(row.jsonConfig) : {},
+			caddyfilePath: row.caddyfilePath || null,
+			caddyfileContent: row.caddyfileContent || null,
 			metadata: row.metadata ? JSON.parse(row.metadata) : {},
 			history: row.history ? JSON.parse(row.history) : [],
 			createdAt: row.createdAt ? new Date(row.createdAt) : null,

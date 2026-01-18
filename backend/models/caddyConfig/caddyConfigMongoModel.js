@@ -22,12 +22,22 @@ const caddyConfigSchema = new Schema({
   format: {
     type: String,
     default: 'json',
-    enum: ['json']
+    enum: ['json', 'caddyfile']
   },
   // JSON configuration content
   jsonConfig: {
     type: Object,
-    required: true
+    required: function() { return this.format === 'json'; }
+  },
+  // Optional Caddyfile-based configuration (either a path or raw content)
+  caddyfilePath: {
+    type: String,
+    required: false,
+    trim: true
+  },
+  caddyfileContent: {
+    type: String,
+    required: false
   },
   // Current status of this configuration
   status: {
@@ -58,7 +68,9 @@ const caddyConfigSchema = new Schema({
 
 // Virtual property to get the configuration content
 caddyConfigSchema.virtual('content').get(function() {
-  return this.jsonConfig;
+  if (this.format === 'json') return this.jsonConfig;
+  if (this.format === 'caddyfile') return this.caddyfileContent || null;
+  return null;
 });
 
 // Pre-save hook to ensure backward compatibility

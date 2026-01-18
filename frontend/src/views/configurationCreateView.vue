@@ -1,7 +1,7 @@
 <template>
   <div class="">
     <page-title-comp 
-      title="Create New Configuration"
+      :title="`Create New ${configDetails.format === 'json' ? 'JSON' : 'Caddyfile'} Configuration`"
       :breadcrumbs="[
         { name: 'Dashboard', path: '/' },
         { name: 'Configurations', path: '/configs' },
@@ -24,12 +24,18 @@
       
       <!-- Right column: Configuration content details (2/3 width) -->
       <div class="lg:col-span-2 flex flex-col">
-        <configuration-create-data-comp 
-          @json-content-updated="onJsonContentUpdated"
-          @json-validation="onJsonValidation"
-        />
+          <configuration-create-data-comp 
+            :format="configDetails.format"
+            @json-content-updated="onJsonContentUpdated"
+            @json-validation="onJsonValidation"
+            @caddyfile-content-updated="onCaddyfileContentUpdated"
+            @caddyfile-validation="onCaddyfileValidation"
+          />
       </div>
     </div>
+
+    <!-- Modal to choose config type -->
+    <modal-choice-comp v-if="showTypeModal" @choice="onTypeChoice" @cancel="onTypeCancel" />
     
     <!-- Action buttons -->
     <div class="flex justify-end pt-6 mt-4 border-t border-gray-200">
@@ -42,7 +48,7 @@
       <button 
         @click="createConfiguration"
         class="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-        :disabled="isCreating || !!jsonValidationError || !isFormValid"
+        :disabled="isCreating || !isFormValid || (configDetails.format === 'json' ? !!jsonValidationError : !!caddyfileValidationError)"
       >
         <span v-if="isCreating" class="mr-2">
           <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -59,13 +65,14 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCaddyConfigsStore } from '@/stores/caddyConfigsStore'
 import { useCaddyServersStore } from '@/stores/caddyServersStore'
 import ConfigurationCreateDetailsComp from '@/components/configurations/configurationCreateDetailsComp.vue'
 import ConfigurationCreateDataComp from '@/components/configurations/configurationCreateDataComp.vue'
 import PageTitleComp from '@/components/util/pageTitleComp.vue'
+import ModalChoiceComp from '@/components/modals/modalChoiceComp.vue'
 import { useNotification } from "@kyvg/vue3-notification"
 
 const router = useRouter()
@@ -77,6 +84,7 @@ const { notify } = useNotification()
 const error = ref(null)
 const isCreating = ref(false)
 const jsonValidationError = ref(null)
+const showTypeModal = ref(false)
 
 // Data for storing configuration details and content
 const configDetails = ref({
@@ -103,6 +111,9 @@ const jsonContent = ref({
   }
 })
 
+const caddyfileContent = ref('')
+const caddyfileValidationError = ref(null)
+
 // Check if the form is valid
 const isFormValid = computed(() => {
   // Require at least a name
@@ -124,9 +135,30 @@ function onJsonValidation(isValid) {
   jsonValidationError.value = isValid ? null : 'JSON validation error'
 }
 
+function onCaddyfileContentUpdated(content) {
+  caddyfileContent.value = content
+}
+
+function onCaddyfileValidation(isValid) {
+  caddyfileValidationError.value = isValid ? null : 'Caddyfile validation error'
+}
+
+// Show modal on mount to choose configuration type
+onMounted(() => {
+  showTypeModal.value = true
+})
+
+function onTypeChoice(type) {
+  // Accept 'json' or 'caddyfile'
+  if (type === 'json' || type === 'caddyfile') {
+    configDetails.value.format = type
+  }
+  showTypeModal.value = false
+}
+
 // Create a new configuration
 async function createConfiguration() {
-  if (!isFormValid.value || jsonValidationError.value) {
+  if (!isFormValid.value || (configDetails.value.format === 'json' ? jsonValidationError.value : caddyfileValidationError.value)) {
     error.value = 'Please fill in all required fields and fix any validation errors.'
     return
   }
@@ -139,9 +171,14 @@ async function createConfiguration() {
     const configData = {
       name: configDetails.value.name,
       status: configDetails.value.status || 'draft',
-      format: 'json',
-      jsonConfig: jsonContent.value,
+      format: configDetails.value.format,
       metadata: configDetails.value.metadata || {}
+    }
+
+    if (configDetails.value.format === 'json') {
+      configData.jsonConfig = jsonContent.value
+    } else if (configDetails.value.format === 'caddyfile') {
+      configData.caddyfile = caddyfileContent.value
     }
     
     // Handle server selection

@@ -7,6 +7,7 @@ const { connectToMongo, disconnectFromMongo } = require('./services/mongoService
 const { connectToSQLite } = require('./services/sqliteService');
 const pingService = require('./services/pingService');
 const routes = require('./router');
+const caddyfileService = require('./services/caddyfileService');
 
 // Create Express app
 const app = express();
@@ -51,6 +52,19 @@ app.use('/', routes);
 // Start the ping service
 const pingServiceStatus = pingService.startPingService();
 console.log(`Ping service initialized: ${JSON.stringify(pingServiceStatus)}`);
+
+// Startup test: validate and list configured mounted Caddyfiles and log results.
+try {
+  const validation = caddyfileService.validateMountedCaddyfiles();
+  console.log('Startup: mounted Caddyfiles:', JSON.stringify(validation.checked, null, 2));
+  if (!validation.allExist) {
+    console.warn('Startup: some mounted Caddyfiles are missing or not accessible:', JSON.stringify(validation.missing, null, 2));
+  } else {
+    console.log('Startup: all mounted Caddyfiles exist.');
+  }
+} catch (err) {
+  console.error('Startup Caddyfile check failed:', err && err.message ? err.message : err);
+}
 
 // Global error handler
 app.use((err, req, res, next) => {

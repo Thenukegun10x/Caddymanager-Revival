@@ -1,5 +1,6 @@
 const express = require('express');
 const caddyRoutes = require('./caddyRoutes');
+const caddyfileRoutes = require('./caddyfileRoutes');
 const convertRoutes = require('./convertRoutes');
 const authRoutes = require('./authRoutes');
 const apiKeyRoutes = require('./apiKeyRoutes');
@@ -35,6 +36,9 @@ const API_PREFIX = '/api/v1';
 
 // Mount Caddy routes
 router.use(`${API_PREFIX}/caddy`, caddyRoutes);
+
+// Mount mounted-Caddyfile routes (env-mounted caddyfiles)
+router.use(`${API_PREFIX}/caddyfiles`, caddyfileRoutes);
 
 // Mount Convert routes
 router.use(`${API_PREFIX}/convert`, convertRoutes);

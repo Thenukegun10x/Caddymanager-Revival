@@ -14,18 +14,20 @@
               <div class="flex border border-gray-200 rounded-lg shadow-xs overflow-hidden">
                 <button
                   type="button"
-                  class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
-                  :class="editMode === 'editor' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
-                  @click="editMode = 'editor'"
+                    v-if="!isCaddyfileMode"
+                    class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
+                    :class="editMode === 'editor' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                    @click="editMode = 'editor'"
                 >
                   <CodeBracketSquareIcon class="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                   JSON Editor
                 </button>
                 <button
                   type="button"
-                  class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
-                  :class="editMode === 'ace' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
-                  @click="editMode = 'ace'"
+                    v-if="!isCaddyfileMode"
+                    class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
+                    :class="editMode === 'ace' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                    @click="editMode = 'ace'"
                 >
                   <CodeBracketIcon class="h-3.5 w-3.5 mr-1" aria-hidden="true" />
                   Raw JSON (Ace)
@@ -76,7 +78,7 @@
           </div>
 
           <!-- JSON Editor Mode -->
-          <div v-if="editMode === 'editor'" class="mb-4">
+          <div v-if="editMode === 'editor' && !isCaddyfileMode" class="mb-4">
             <label for="jsonEditor" class="block text-sm font-medium text-tertiary mb-2">Create JSON Configuration</label>
             <div class="relative border border-gray-300 rounded-md overflow-hidden">
               <!-- Vue3 JSON Editor Component -->
@@ -98,7 +100,7 @@
           </div>
 
           <!-- Ace Editor Mode -->
-          <div v-if="editMode === 'ace'" class="mb-4">
+          <div v-if="editMode === 'ace' && !isCaddyfileMode" class="mb-4">
             <label class="block text-sm font-medium text-tertiary mb-2">Raw JSON (Ace Editor)</label>
             <ace-editor-sub-comp
               :modelValue="aceEditorContent"
@@ -228,7 +230,7 @@ example.com {
                     <div v-html="caddyfileValidationError.replace(/\n/g, '<br>')"></div>
                   </div>
                 </div>
-                <div class="mt-2 text-xs text-gray-500">
+                <div class="mt-2 text-xs text-gray-500"  v-if="!isCaddyfileMode">
                   <p class="mb-1"><span class="font-medium">Note:</span> The conversion process has some limitations:</p>
                   <ul class="list-disc pl-5 space-y-1">
                     <li>Environment variables (like {env.VAR}) are preserved during conversion but require proper setup on the target server</li>
@@ -238,7 +240,7 @@ example.com {
                 </div>
               </div>
 
-              <div class="flex justify-between mt-4">
+              <div class="flex justify-between mt-4" v-if="!isCaddyfileMode">
                 <div class="flex items-center space-x-3">
                   <button 
                     @click="loadExampleCaddyfile"
@@ -276,7 +278,7 @@ example.com {
               </div>
 
               <!-- Conversion Result Preview -->
-              <div v-if="conversionResult" class="mt-4">
+              <div v-if="conversionResult && !isCaddyfileMode" class="mt-4">
                 <h3 class="text-md font-semibold mb-2">Conversion Result (Preview)</h3>
                 <div class="border border-gray-300 rounded-md bg-gray-50 p-4 overflow-auto max-h-[300px]">
                   <VueJsonPretty
@@ -300,7 +302,7 @@ example.com {
             </div>
           </div>
 
-          <div class="flex justify-between mt-6 pt-4 border-t border-gray-200">
+          <div class="flex justify-between mt-6 pt-4 border-t border-gray-200" v-if="!isCaddyfileMode">
             <div class="flex space-x-2">
               <button 
                 @click="checkForDuplicates"
@@ -530,8 +532,13 @@ import {
 } from '@heroicons/vue/24/outline'
 
 
-const emit = defineEmits(['json-content-updated', 'json-validation'])
+const emit = defineEmits(['json-content-updated', 'json-validation', 'caddyfile-content-updated', 'caddyfile-validation'])
 
+const props = defineProps({
+  format: { type: String, default: 'json' }
+})
+
+const isCaddyfileMode = computed(() => props.format === 'caddyfile')
 const router = useRouter()
 const configsStore = useCaddyConfigsStore()
 const serversStore = useCaddyServersStore()
@@ -605,6 +612,16 @@ onMounted(async () => {
   // Fetch servers for the dropdown
   if (serversStore.servers.length === 0) {
     await serversStore.fetchServers()
+  }
+})
+
+// When parent switches the format, ensure the editor tab follows
+watch(isCaddyfileMode, (val) => {
+  if (val) {
+    editMode.value = 'caddyfile'
+  } else {
+    // default back to editor when leaving caddyfile mode
+    if (editMode.value === 'caddyfile') editMode.value = 'editor'
   }
 })
 
@@ -840,6 +857,9 @@ const selectedServerId = ref('') // Add selected server ID state
 
 function updateCaddyfile() {
   caddyfileValidationError.value = null
+  // Emit content change and positive validation unless an error exists
+  emit('caddyfile-content-updated', caddyfileContent.value)
+  emit('caddyfile-validation', true)
 }
 
 async function convertCaddyfileToJson() {
@@ -939,6 +959,15 @@ function loadExampleCaddyfile() {
     file_server
   }`
 }
+
+// Emit caddyfile content updates and validation status when content or errors change
+watch(caddyfileContent, (val) => {
+  emit('caddyfile-content-updated', val)
+})
+
+watch(caddyfileValidationError, (val) => {
+  emit('caddyfile-validation', !val)
+})
 
 function useConversionResult() {
   if (!conversionResult.value) return;
