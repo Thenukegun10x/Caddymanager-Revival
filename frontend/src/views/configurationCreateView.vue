@@ -35,7 +35,7 @@
     </div>
 
     <!-- Modal to choose config type -->
-    <modal-choice-comp v-if="showTypeModal" @choice="onTypeChoice" @cancel="onTypeCancel" />
+    <modal-choice-comp v-if="showTypeModal" @choice="onTypeChoice" />
     
     <!-- Action buttons -->
     <div class="flex justify-end pt-6 mt-4 border-t border-gray-200">
@@ -66,6 +66,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useCaddyfileStore } from '@/stores/caddyfileStore'
+import config from '@/services/configService'
 import { useRouter } from 'vue-router'
 import { useCaddyConfigsStore } from '@/stores/caddyConfigsStore'
 import { useCaddyServersStore } from '@/stores/caddyServersStore'
@@ -78,6 +80,7 @@ import { useNotification } from "@kyvg/vue3-notification"
 const router = useRouter()
 const configsStore = useCaddyConfigsStore()
 const serversStore = useCaddyServersStore()
+const caddyfileStore = useCaddyfileStore()
 const { notify } = useNotification()
 
 // State variables
@@ -121,8 +124,18 @@ const isFormValid = computed(() => {
 })
 
 // Handle configuration details updates from the details component
+// Handle configuration details updates from the details component
 function onDetailsUpdated(details) {
-  configDetails.value = details
+  // Merge partial updates from the details component into the existing configDetails
+  // This preserves fields (like `format`) that the child doesn't emit
+  configDetails.value = {
+    ...configDetails.value,
+    ...details,
+    metadata: {
+      ...configDetails.value.metadata,
+      ...(details && details.metadata ? details.metadata : {})
+    }
+  }
 }
 
 // Handle JSON content updates from the data component
@@ -146,6 +159,16 @@ function onCaddyfileValidation(isValid) {
 // Show modal on mount to choose configuration type
 onMounted(() => {
   showTypeModal.value = true
+
+  // If we have an auth token, load mounted caddyfiles and their contents for this view
+  try {
+    const token = localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
+    if (token && typeof caddyfileStore.initialize === 'function') {
+      caddyfileStore.initialize().catch(e => console.debug('Failed to initialize caddyfile store in configurationCreateView', e))
+    }
+  } catch (e) {
+    // ignore localStorage errors
+  }
 })
 
 function onTypeChoice(type) {

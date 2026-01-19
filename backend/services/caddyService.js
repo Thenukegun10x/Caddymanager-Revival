@@ -299,9 +299,9 @@ volumes:
     if (!configData.name) {
       throw new Error('Configuration name is required');
     }
-    
-    if (!configData.jsonConfig) {
-      throw new Error('JSON configuration content is required');
+    // Accept either JSON config or Caddyfile content
+    if (!configData.jsonConfig && !configData.caddyfile) {
+      throw new Error('Configuration content is required: provide jsonConfig or caddyfile');
     }
     
     // Ensure servers is always an array
@@ -325,8 +325,10 @@ volumes:
       }
     }
     
-    // Always use json format
-    configData.format = 'json';
+    // Determine format
+    if (!configData.format) {
+      configData.format = configData.jsonConfig ? 'json' : 'caddyfile';
+    }
     
     // Set default status if not provided
     if (!configData.status) {
@@ -358,8 +360,19 @@ volumes:
       configData.servers = configData.server ? [configData.server] : [];
     }
 
-    // Force format to json
-    configData.format = 'json';
+    // Infer format if not provided
+    if (!configData.format) {
+      if (configData.jsonConfig) configData.format = 'json';
+      else if (configData.caddyfile) configData.format = 'caddyfile';
+    }
+
+    // Validate content exists for the selected format
+    if (configData.format === 'json' && !configData.jsonConfig) {
+      throw new Error('jsonConfig is required for format json');
+    }
+    if (configData.format === 'caddyfile' && !configData.caddyfile) {
+      throw new Error('caddyfile content is required for format caddyfile');
+    }
 
     // Create a new config
     const newConfig = caddyConfigRepository.createInstance(configData);
@@ -376,8 +389,10 @@ volumes:
     // Update query to use the servers array instead of the deprecated server field
     const query = { servers: serverId };
     
-    // Always use JSON format
-    query.format = 'json';
+    // Optionally filter by format
+    if (options.format) {
+      query.format = options.format;
+    }
     
     // Add status filter if specified
     if (options.status) {
@@ -496,11 +511,24 @@ volumes:
       try {
         console.log(`Applying to server ${server.name} (${server._id}) at ${server.apiUrl}:${server.apiPort}${server.adminApiPath}`);
         
-        // First, validate the configuration against this server
-        try {
+        // Prepare content to apply (if Caddyfile, adapt it first)
+        let contentToApply = null;
+          if (config.format === 'caddyfile') {
+            // Convert Caddyfile to JSON via the server's adapt endpoint
+            const axiosInstance = this.createAxiosInstance(server);
+            console.log(`Adapting Caddyfile for server ${server.name}...`);
+            const adaptResponse = await axiosInstance.post('/adapt', config.caddyfile, {
+              headers: { 'Content-Type': 'text/plain' }
+            });
+            contentToApply = adaptResponse.data;
+          } else {
+            contentToApply = config.jsonConfig;
+          }
+
+          // Validate the prepared JSON config
           console.log(`Validating configuration on ${server.name} before applying...`);
-          const validationResult = await this.validateConfig(server, config.jsonConfig);
-          
+          const validationResult = await this.validateConfig(server, contentToApply);
+
           if (!validationResult.isValid) {
             console.error(`Configuration validation failed for server ${server.name}:`, validationResult.message);
             results.failed.push({
@@ -510,22 +538,13 @@ volumes:
             });
             continue;
           }
-          
+
           console.log(`Configuration validated successfully on ${server.name}`);
-        } catch (validationError) {
-          console.error(`Error during validation for server ${server.name}:`, validationError.message);
-          results.failed.push({
-            serverId,
-            name: server.name,
-            error: `Validation error: ${validationError.message}`
-          });
-          continue;
-        }
-        
-        const axiosInstance = this.createAxiosInstance(server);
-        
-        // Apply JSON config using the server's configured adminApiPath
-        const result = await axiosInstance.post(server.adminApiPath, config.jsonConfig);
+
+          const axiosInstance = this.createAxiosInstance(server);
+
+          // Apply JSON config using the server's configured adminApiPath
+          const result = await axiosInstance.post(server.adminApiPath, contentToApply);
         
         console.log(`Successfully applied config to ${server.name}`, result.status);
         
@@ -685,7 +704,11 @@ volumes:
    * @returns {Promise<Array>} - Array of configurations
    */
   async getAllConfigs(options = {}) {
-    const query = { format: 'json' };
+    const query = {};
+    // Optionally filter by format
+    if (options.format) {
+      query.format = options.format;
+    }
     
     // Add status filter if specified
     if (options.status) {
@@ -870,16 +893,30 @@ volumes:
       // Get the original document
       const config = await caddyConfigRepository.findById(configId);
       if (!config) return null;
-      
-      // Update the JSON content
-      if (contentData.content) {
-        config.jsonConfig = contentData.content;
-      } else if (contentData.jsonConfig) {
+      // Update content based on provided data and format
+      if (contentData.jsonConfig) {
         config.jsonConfig = contentData.jsonConfig;
+        config.format = 'json';
+      } else if (contentData.caddyfile) {
+        config.caddyfile = contentData.caddyfile;
+        config.format = 'caddyfile';
+        // clear any existing jsonConfig until adapted/applied
+        // keep jsonConfig if present but it's no longer source of truth
+      } else if (contentData.content) {
+        // attempt to detect structure: if object -> json, else -> caddyfile
+        if (typeof contentData.content === 'object') {
+          config.jsonConfig = contentData.content;
+          config.format = 'json';
+        } else if (typeof contentData.content === 'string') {
+          config.caddyfile = contentData.content;
+          config.format = 'caddyfile';
+        } else {
+          throw new Error('No valid content provided for update');
+        }
       } else {
         throw new Error('No valid content provided for update');
       }
-      
+
       // Set status back to draft when content is modified
       config.status = 'draft';
       

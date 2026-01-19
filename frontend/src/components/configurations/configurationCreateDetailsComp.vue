@@ -96,7 +96,7 @@ const formError = ref(null)
 const formData = ref({
   name: '',
   status: 'draft',
-  format: 'json', // Always JSON for new configurations
+  format: null, //
   serverId: '',
   metadata: {
     description: '',
@@ -122,8 +122,10 @@ watch([formData, tagsInput], ([newFormData, newTagsInput]) => {
     .filter(tag => tag !== '')
   
   // Prepare the data to send
+  // Remove `format` from emitted payload so parent keeps its selected format
+  const { format, ...rest } = newFormData || {}
   const detailsToUpdate = { 
-    ...newFormData,
+    ...rest,
     metadata: {
       ...newFormData.metadata,
       tags

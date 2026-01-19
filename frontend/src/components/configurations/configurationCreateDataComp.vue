@@ -195,8 +195,20 @@
           <!-- Caddyfile Mode -->
           <div v-if="editMode === 'caddyfile'" class="mb-4">
             <div class="flex flex-col gap-4">
-              <div>
+                <div>
                 <label for="caddyfileEditor" class="block text-sm font-medium text-tertiary mb-2">Create Caddyfile Configuration</label>
+
+                <!-- Import mounted Caddyfile selector -->
+                <div v-if="isCaddyfileMode" class="mb-3">
+                  <label class="block text-xs font-medium text-gray-600 mb-1">Import Mounted Caddyfile</label>
+                  <SelectFieldComp
+                    v-model="selectedMountedCaddyfile"
+                    :options="mountedOptions"
+                    placeholder="Select a mounted Caddyfile to import"
+                    extraClass="w-full"
+                  />
+                </div>
+
                 <div class="relative border border-gray-300 rounded-md overflow-hidden">
                   <textarea
                     id="caddyfileEditor"
@@ -495,6 +507,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import aceEditorSubComp from '@/components/util/aceEditorSubComp.vue'
 import InputFieldComp from '@/components/util/inputFieldComp.vue'
 import SelectFieldComp from '@/components/util/selectFieldComp.vue'
+import { useCaddyfileStore } from '@/stores/caddyfileStore'
 import CheckboxFieldComp from '@/components/util/checkboxFieldComp.vue'
 import { useCaddyConfigsStore } from '@/stores/caddyConfigsStore'
 import { useCaddyServersStore } from '@/stores/caddyServersStore'
@@ -543,6 +556,30 @@ const router = useRouter()
 const configsStore = useCaddyConfigsStore()
 const serversStore = useCaddyServersStore()
 const servers = computed(() => serversStore.servers)
+
+// Mounted Caddyfiles store (for importing mounted Caddyfiles into the editor)
+const caddyfileStore = useCaddyfileStore()
+const mountedOptions = computed(() => {
+  return (caddyfileStore.mounted || []).map(m => ({ value: m.id || m._id, label: m.label || m.id || m._id }))
+})
+const selectedMountedCaddyfile = ref('')
+
+watch(selectedMountedCaddyfile, async (id) => {
+  if (!id) return
+  try {
+    const entry = caddyfileStore.mounted.find(m => (m.id || m._id) === id)
+    let content = entry && entry.content
+    if (content == null) {
+      content = await caddyfileStore.fetchMountedContent(id)
+    }
+    caddyfileContent.value = content || ''
+    // emit update so parent can react
+    emit('caddyfile-content-updated', caddyfileContent.value)
+    emit('caddyfile-validation', true)
+  } catch (e) {
+    console.error('Failed to import mounted caddyfile', e)
+  }
+})
 
 // Edit mode toggle
 const editMode = ref('editor')

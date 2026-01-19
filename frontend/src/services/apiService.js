@@ -93,7 +93,9 @@ function getApiClient() {
  */
 const apiService = {
   get(endpoint, params = {}) {
-    return getApiClient().get(endpoint, { params })
+    // Accept a full axios config object (e.g. { params, responseType })
+    const axiosConfig = params || {}
+    return getApiClient().get(endpoint, axiosConfig)
   },
   post(endpoint, data = {}, config = {}) {
     return getApiClient().post(endpoint, data, config)
@@ -101,11 +103,11 @@ const apiService = {
   put(endpoint, data = {}, config = {}) {
     return getApiClient().put(endpoint, data, config)
   },
-  patch(endpoint, data = {}) {
-    return getApiClient().patch(endpoint, data)
+  patch(endpoint, data = {}, config = {}) {
+    return getApiClient().patch(endpoint, data, config)
   },
-  delete(endpoint) {
-    return getApiClient().delete(endpoint)
+  delete(endpoint, config = {}) {
+    return getApiClient().delete(endpoint, config)
   },
   async getSwaggerDocs() {
     try {

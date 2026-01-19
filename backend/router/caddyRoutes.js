@@ -68,11 +68,14 @@ router.use(protect);
  *           description: Configuration name
  *         format:
  *           type: string
- *           enum: [json]
- *           description: Configuration format - always JSON
+ *           enum: [json, caddyfile]
+ *           description: Configuration format - either 'json' or 'caddyfile'
  *         jsonConfig:
  *           type: object
- *           description: The JSON configuration content
+ *           description: The JSON configuration content (when format is 'json')
+ *         caddyfile:
+ *           type: string
+ *           description: The raw Caddyfile content (when format is 'caddyfile')
  *         status:
  *           type: string
  *           enum: [draft, live, archived]

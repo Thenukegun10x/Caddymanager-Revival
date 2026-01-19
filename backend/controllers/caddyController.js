@@ -584,9 +584,9 @@ const caddyController = {
   getConfigsForServer: async (req, res) => {
     try {
       const serverId = req.params.id;
-      const { status } = req.query;
-      
-      const configs = await caddyService.getConfigs(serverId, { status });
+      const { status, format } = req.query;
+
+      const configs = await caddyService.getConfigs(serverId, { status, format });
       
       res.status(200).json({
         success: true,
@@ -668,17 +668,19 @@ const caddyController = {
           message: 'Name is a required field'
         });
       }
-      
-      // Validate config content
-      if (!configData.jsonConfig) {
+
+      // Validate config content - accept either JSON or Caddyfile
+      if (!configData.jsonConfig && !configData.caddyfile) {
         return res.status(400).json({
           success: false,
-          message: 'JSON configuration content is required'
+          message: 'Either jsonConfig or caddyfile content is required'
         });
       }
-      
-      // Always use json format
-      configData.format = 'json';
+
+      // Determine format if not explicitly set
+      if (!configData.format) {
+        configData.format = configData.jsonConfig ? 'json' : 'caddyfile';
+      }
       
       // Add history entry if not provided
       if (!configData.history || configData.history.length === 0) {
@@ -825,11 +827,12 @@ const caddyController = {
   getAllConfigs: async (req, res) => {
     try {
       // Extract optional filter parameters
-      const { status, server } = req.query;
-      
-      const configs = await caddyService.getAllConfigs({ 
+      const { status, server, format } = req.query;
+
+      const configs = await caddyService.getAllConfigs({
         status,
-        server 
+        server,
+        format
       });
       
       res.status(200).json({
