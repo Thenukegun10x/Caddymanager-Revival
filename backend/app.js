@@ -29,10 +29,30 @@ if (DB_ENGINE === 'mongodb') {
 
 // Middleware
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
+  // reflect request origin (avoids using '*' when credentials are allowed)
+  origin: true,
+  credentials: true,
+  allowedHeaders: 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+  methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+  optionsSuccessStatus: 204
 };
 app.use(cors(corsOptions));
+// Ensure CORS headers are present for all responses and echo the request origin when available.
+app.use((req, res, next) => {
+  const reqOrigin = req.headers.origin || process.env.CORS_ORIGIN || '*';
+  // When credentials are allowed, echo the request origin instead of using '*'
+  const allowOrigin = (reqOrigin && corsOptions.credentials) ? reqOrigin : reqOrigin;
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders);
+  res.setHeader('Access-Control-Allow-Methods', corsOptions.methods);
+  if (corsOptions.credentials) {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(corsOptions.optionsSuccessStatus || 204);
+  }
+  next();
+});
 app.use(express.json({ limit: '50mb' }));
 app.use(express.text({ limit: '50mb', type: 'text/plain' })); // Add text parser middleware
 app.use(express.urlencoded({ extended: true }));
