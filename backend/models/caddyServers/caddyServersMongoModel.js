@@ -25,6 +25,12 @@ const caddyServerSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Optional UUID that links this server to a mounted Caddyfile declared in .env (CADDYFILE_<UUID>_PATH)
+  caddyfileUuid: {
+    type: String,
+    trim: true,
+    default: null
+  },
   tags: {
     type: [String],
     default: []

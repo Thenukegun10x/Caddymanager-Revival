@@ -83,6 +83,9 @@ const caddyServersRepository = {
       } else if (key === 'lastPinged' && updateData[key] instanceof Date) {
         updateFields.push(`${key} = ?`);
         updateValues.push(updateData[key].toISOString());
+      } else if (key === 'caddyfileUuid') {
+        updateFields.push('caddyfile_uuid = ?');
+        updateValues.push(updateData[key] || null);
       } else {
         updateFields.push(`${key} = ?`);
         updateValues.push(updateData[key]);

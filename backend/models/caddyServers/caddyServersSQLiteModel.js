@@ -14,6 +14,7 @@ function ensureTable() {
 			apiUrl TEXT NOT NULL,
 			apiPort INTEGER DEFAULT 2019,
 			adminApiPath TEXT DEFAULT '/config/',
+			caddyfile_uuid TEXT,
 			active INTEGER DEFAULT 1,
 			tags TEXT DEFAULT '[]',
 			description TEXT,
@@ -23,6 +24,18 @@ function ensureTable() {
 			createdAt TEXT NOT NULL,
 			updatedAt TEXT NOT NULL
 		)`).run();
+
+		// Ensure `caddyfile_uuid` column exists (handle migrations for existing DBs)
+		try {
+			const cols = dbInstance.prepare("PRAGMA table_info('caddy_servers')").all();
+			const hasCaddyfileUuid = cols.some(c => c.name === 'caddyfile_uuid');
+			if (!hasCaddyfileUuid) {
+				console.log('Migrating: adding caddyfile_uuid column to caddy_servers');
+				dbInstance.prepare("ALTER TABLE caddy_servers ADD COLUMN caddyfile_uuid TEXT").run();
+			}
+		} catch (migrationErr) {
+			console.error('Error ensuring caddyfile_uuid column exists:', migrationErr && migrationErr.message ? migrationErr.message : migrationErr);
+		}
 	} catch (error) {
 		console.error('Error ensuring caddy_servers table:', error.message);
 	}
@@ -35,13 +48,14 @@ const CaddyServersSQLiteModel = {
 		const db = getDB();
 		const now = new Date();
 		const stmt = db.prepare(`INSERT INTO caddy_servers (
-			name, apiUrl, apiPort, adminApiPath, active, tags, description, lastPinged, status, activeConfig, createdAt, updatedAt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+			name, apiUrl, apiPort, adminApiPath, caddyfile_uuid, active, tags, description, lastPinged, status, activeConfig, createdAt, updatedAt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 		const info = stmt.run(
 			server.name,
 			server.apiUrl,
 			server.apiPort || 2019,
 			server.adminApiPath || '/config/',
+			server.caddyfileUuid || null,
 			server.active !== undefined ? (server.active ? 1 : 0) : 1,
 			JSON.stringify(server.tags || []),
 			server.description || null,
@@ -121,6 +135,9 @@ const CaddyServersSQLiteModel = {
 				} else {
 					updateValues.push(null);
 				}
+			} else if (key === 'caddyfileUuid') {
+				updateFields.push('caddyfile_uuid = ?');
+				updateValues.push(updateData[key] || null);
 			} else if (key === 'active') {
 				updateFields.push(`${key} = ?`);
 				updateValues.push(updateData[key] ? 1 : 0);
@@ -167,6 +184,7 @@ const CaddyServersSQLiteModel = {
 			...row,
 			_id: String(row.id), // Convert to string and add _id for Mongoose compatibility
 			id: String(row.id), // Convert id to string for consistency
+			caddyfileUuid: row.caddyfile_uuid || null,
 			active: !!row.active,
 			activeConfig: row.activeConfig ? String(row.activeConfig) : null, // Convert to string for Vue components
 			tags: row.tags ? JSON.parse(row.tags) : [],

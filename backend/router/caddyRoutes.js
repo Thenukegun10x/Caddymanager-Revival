@@ -39,10 +39,16 @@ router.use(protect);
  *           type: string
  *           enum: [online, offline, unknown]
  *           description: Current server status
+        caddyfileUuid:
+          type: string
+          description: Optional UUID referencing a mounted Caddyfile defined in `.env` (CADDYFILE_<UUID>_PATH)
  *         lastPinged:
  *           type: string
  *           format: date-time
  *           description: When the server was last contacted successfully
+        caddyfileUuid:
+          type: string
+          description: Optional UUID key referencing a mounted Caddyfile declared in `.env` (e.g. CADDYFILE_<UUID>_PATH)
  *       required:
  *         - name
  *         - apiUrl
