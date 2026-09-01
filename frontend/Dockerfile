@@ -33,6 +33,10 @@ FROM caddy:2-alpine
 COPY --from=build /var/www/dist /usr/share/caddy
 COPY --from=build /var/www/Caddyfile /etc/caddy/Caddyfile
 
+# Run as non-root (SAST dockerfile.security.missing-user)
+RUN addgroup -S caddy && adduser -S -G caddy caddy || true
+USER caddy
+
 EXPOSE 80
 
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]

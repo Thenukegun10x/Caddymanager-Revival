@@ -43,13 +43,16 @@ class Encryption {
             'sha512'
         );
 
+        const authTagBuf = Buffer.from(encryptedData.authTag, 'hex');
+        if (authTagBuf.length !== 16) throw new Error('Invalid authTag length');
         const decipher = crypto.createDecipheriv(
             'aes-256-gcm',
             key,
-            Buffer.from(encryptedData.iv, 'hex')
+            Buffer.from(encryptedData.iv, 'hex'),
+            { authTagLength: 16 }
         );
 
-        decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
+        decipher.setAuthTag(authTagBuf);
 
         let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
         decrypted += decipher.final('utf8');
