@@ -1,58 +1,66 @@
-# Use a glibc-based Node image to avoid musl/glibc native-addon incompatibilities
-FROM node:20-bullseye-slim
-
-RUN mkdir -p /usr/src/node-app && chown -R node:node /usr/src/node-app
-RUN mkdir -p /app/data && chown -R node:node /app/data
-
-# Install PM2 globally before switching to node user
-RUN npm install pm2 -g
+# syntax=docker/dockerfile:1
+# Multi-stage — builder compiles native addons, runtime is slim bookworm without build tools
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /usr/src/node-app
+
+# Build deps for better-sqlite3 (needs python + build-essential)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Accept build arguments
 ARG BUILD_NUMBER=unknown
 ARG GIT_COMMIT=unknown
 ARG GIT_BRANCH=unknown
 ARG BUILD_DATE=unknown
-
-# Set environment variables from build args
 ENV BUILD_NUMBER=$BUILD_NUMBER
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV GIT_BRANCH=$GIT_BRANCH
 ENV BUILD_DATE=$BUILD_DATE
 
 COPY package*.json ./
-
-# Install dependencies as root. Prebuilt native binaries for glibc should now be compatible
-# with this base image; no need to force build-from-source.
-RUN npm ci && chown -R node:node /usr/src/node-app
-
-# Install build dependencies so native modules can be compiled inside the image
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Force native modules to build from source inside this image so binaries are
-# compiled against the image's glibc version and avoid prebuilt binary mismatches.
+# Force native build against bookworm glibc
 ENV npm_config_build_from_source=true
+RUN npm ci --build-from-source --unsafe-perm
 
-# Install packages (builds native addons) and ensure node owns the app directory
-RUN npm ci --build-from-source --unsafe-perm && chown -R node:node /usr/src/node-app
+COPY . .
+RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || ls -la src/build-info.* 2>/dev/null || echo "no build-info"
 
-# Copy project files and switch to unprivileged user for runtime
+# Runtime — no build tools, non-root
+FROM node:20-bookworm-slim
+
+RUN mkdir -p /usr/src/node-app && chown -R node:node /usr/src/node-app
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
+WORKDIR /usr/src/node-app
+
+ARG BUILD_NUMBER=unknown
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_DATE=unknown
+ENV BUILD_NUMBER=$BUILD_NUMBER
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV GIT_BRANCH=$GIT_BRANCH
+ENV BUILD_DATE=$BUILD_DATE
+ENV NODE_ENV=production
+
+COPY --from=builder /usr/src/node-app/node_modules ./node_modules
+COPY --from=builder /usr/src/node-app/package*.json ./
 COPY --chown=node:node . .
+# Overwrite with builder's fresh build-info (with build args)
+COPY --from=builder /usr/src/node-app/build-info.json ./build-info.json
+COPY --from=builder /usr/src/node-app/build-info.js ./build-info.js
+
+# Ensure entrypoint and ownership
+RUN chown -R node:node /usr/src/node-app && chmod +x /usr/src/node-app/docker-entrypoint.sh || true
+
 USER node
 
-# Generate build info with passed environment variables and ensure it completes
-RUN node scripts/generateBuildInfo.js && \
-    echo "Verifying build info files exist:" && \
-    ls -la src/build-info.* || echo "No build-info files found"
-
-# Entrypoint auto-migrates DB on boot (no user intervention)
-COPY --chown=node:node docker-entrypoint.sh /usr/src/node-app/docker-entrypoint.sh
-RUN chmod +x /usr/src/node-app/docker-entrypoint.sh
-
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://localhost:3000/api/v1/build-info/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/usr/src/node-app/docker-entrypoint.sh"]
 CMD ["npm", "start"]
