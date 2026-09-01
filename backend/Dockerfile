@@ -25,7 +25,9 @@ ENV npm_config_build_from_source=true
 RUN npm ci --build-from-source --unsafe-perm
 
 COPY . .
-RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || ls -la src/build-info.* 2>/dev/null || echo "no build-info"
+RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || echo "no build-info"
+# Prune devDeps for runtime (-60 MB), keep only prod (better-sqlite3 stays)
+RUN npm prune --omit=dev && npm cache clean --force
 
 # Runtime — no build tools, non-root
 FROM node:20-bookworm-slim

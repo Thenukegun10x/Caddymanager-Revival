@@ -16,7 +16,7 @@ ENV BUILD_DATE=$BUILD_DATE
 
 # Copy package files first for better caching
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy source files
 COPY . .
@@ -27,7 +27,7 @@ RUN node scripts/generateBuildInfo.js
 # Build the application
 RUN npm run build
 
-FROM caddy:2-alpine
+FROM caddy:2.10-alpine
 
 # Copy the generated files from build stage
 COPY --from=build /var/www/dist /usr/share/caddy
