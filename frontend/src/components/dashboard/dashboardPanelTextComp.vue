@@ -17,8 +17,8 @@
 						<div v-if="it.meta" class="text-xs text-gray-400">{{ it.meta }}</div>
 					</div>
 					<div class="ml-4 text-right">
-						<!-- support a preformatted HTML value (htmlValue) for colored badges; fallback to plain text value -->
-						<div v-if="it.htmlValue" class="text-sm font-semibold" v-html="it.htmlValue"></div>
+						<!-- htmlValue removed for XSS safety (AGENTS.md H5) — render plain value -->
+						<div v-if="it.htmlValue" class="text-sm font-semibold text-gray-800">{{ it.value }}</div>
 						<div v-else class="text-sm text-gray-800 font-semibold">{{ it.value }}</div>
 					</div>
 				</div>

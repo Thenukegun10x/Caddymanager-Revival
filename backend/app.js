@@ -8,6 +8,12 @@ const { connectToSQLite } = require('./services/sqliteService');
 const pingService = require('./services/pingService');
 const routes = require('./router');
 
+// Fail fast if JWT_SECRET not set in non-test (covers AGENTS.md C1)
+if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
+  console.error('FATAL: JWT_SECRET must be set — refusing to boot with insecure default');
+  process.exit(1);
+}
+
 // Create Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,16 +32,26 @@ if (DB_ENGINE === 'mongodb') {
   process.exit(1);
 }
 
-// Middleware
+// Middleware — hardened per AGENTS.md §7 H2/H7
+const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
+  origin: allowedOrigins ? (origin, cb) => {
+    if (!origin) return cb(null, true); // same-origin / curl
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  } : '*',
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-API-Key']
 };
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.text({ limit: '50mb', type: 'text/plain' })); // Add text parser middleware
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
+app.use(express.json({ limit: '200kb' }));
+app.use(express.text({ limit: '512kb', type: 'text/plain' }));
+app.use(express.urlencoded({ extended: true, limit: '200kb' }));
+// Only verbose logging in development
+if (process.env.NODE_ENV !== 'production') {
+  app.use(morgan('dev'));
+}
 
 // Swagger API Documentation UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, { explorer: true }));
@@ -78,7 +94,14 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-// Handle graceful shutdown
+// Handle graceful shutdown (Docker sends SIGTERM)
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down...');
+  pingService.stopPingService();
+  const DB_ENGINE_TERM = process.env.DB_ENGINE || 'sqlite';
+  if (DB_ENGINE_TERM === 'mongodb') await disconnectFromMongo();
+  process.exit(0);
+});
 process.on('SIGINT', async () => {
   console.log('Shutting down server...');
   pingService.stopPingService();

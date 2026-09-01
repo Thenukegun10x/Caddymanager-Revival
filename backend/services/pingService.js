@@ -1,5 +1,6 @@
 const axios = require('axios');
 const CaddyServer = require('../models/caddyServers');
+const { assertSafeApiUrl, assertSafePort, assertSafeAdminApiPath } = require('../utils/ssrf');
 
 // Environment variables
 const PING_INTERVAL = process.env.PING_INTERVAL || 300000; // Default to 5 minutes (300000 ms) if not set
@@ -40,13 +41,23 @@ const pingServer = async (server) => {
       apiPort: server.apiPort
     });
 
-    // Construct the URL to ping
-    const url = `${server.apiUrl}${server.apiUrl.endsWith('/') ? '' : ':'}${server.apiPort}${server.adminApiPath}`;
+    // Validate before ping — skip private hosts
+    try {
+      assertSafeApiUrl(server.apiUrl);
+      assertSafePort(server.apiPort);
+      assertSafeAdminApiPath(server.adminApiPath);
+    } catch (e) {
+      log('warn', `Skipping ping for unsafe server ${server.name}: ${e.message}`);
+      return { serverId: server._id, name: server.name, status: 'offline', error: e.message };
+    }
+    const base = server.apiUrl.replace(/\/$/, '');
+    const url = `${base}:${server.apiPort}${server.adminApiPath}`;
     
-    // Configure request options (no auth)
     const requestOptions = {
-      timeout: parseInt(PING_TIMEOUT, 10), // Use timeout directly as milliseconds
-      validateStatus: null, // Accept any status code as a response
+      timeout: parseInt(PING_TIMEOUT, 10),
+      validateStatus: null,
+      maxRedirects: 0,
+      maxContentLength: 100000,
     };
 
     log('debug', `Sending request to: ${url} with timeout: ${PING_TIMEOUT}ms`);
@@ -123,9 +134,14 @@ const pingAllServers = async () => {
     
     log('info', `Found ${servers.length} servers to ping`);
     
-    // Ping all servers concurrently
-    const pingPromises = servers.map(server => pingServer(server));
-    const results = await Promise.all(pingPromises);
+    // Ping with concurrency limit to avoid DoS (skip unsafe already handled)
+    const CONCURRENCY = 5;
+    const results = [];
+    for (let i = 0; i < servers.length; i += CONCURRENCY) {
+      const batch = servers.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map(server => pingServer(server)));
+      results.push(...batchResults);
+    }
     
     // Count online and offline servers
     const onlineCount = results.filter(r => r.status === 'online').length;
@@ -151,13 +167,12 @@ const pingAllServers = async () => {
  * Start the ping service interval
  * @returns {Object} - Service status
  */
+let pingInProgress = false;
 const startPingService = () => {
   if (pingInterval) {
     log('info', 'Ping service already running', { interval: PING_INTERVAL });
     return { status: 'already-running', interval: PING_INTERVAL };
   }
-  
-  // Use PING_INTERVAL directly as milliseconds
   const intervalMs = parseInt(PING_INTERVAL, 10);
   
   log('info', `Starting ping service`, {
@@ -167,11 +182,23 @@ const startPingService = () => {
     timeoutSeconds: parseInt(PING_TIMEOUT, 10)/1000
   });
   
-  // Start the interval
-  pingInterval = setInterval(pingAllServers, intervalMs);
+  // Start the interval with overlap guard
+  pingInterval = setInterval(async () => {
+    if (pingInProgress) {
+      log('warn', 'Previous ping still running, skipping tick');
+      return;
+    }
+    pingInProgress = true;
+    try { await pingAllServers(); } finally { pingInProgress = false; }
+  }, intervalMs);
   
-  // Run an initial ping immediately
-  pingAllServers();
+  // Run an initial ping immediately (guarded)
+  (async () => {
+    if (!pingInProgress) {
+      pingInProgress = true;
+      try { await pingAllServers(); } finally { pingInProgress = false; }
+    }
+  })();
   
   log('info', `Ping service started successfully`, {
     intervalMs,

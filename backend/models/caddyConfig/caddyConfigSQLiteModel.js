@@ -85,6 +85,7 @@ const CaddyConfigSQLiteModel = {
 
 		if (Object.keys(query).length > 0) {
 			const conditions = [];
+			const ALLOWED_QUERY = new Set(['status','format','name']);
 			Object.keys(query).forEach(key => {
 				if (key === 'servers') {
 					// For servers array query, we need to check if the server ID is in the JSON array
@@ -93,8 +94,8 @@ const CaddyConfigSQLiteModel = {
 				} else if (key === '_id' && query[key].$ne) {
 					conditions.push(`id != ?`);
 					params.push(query[key].$ne);
-				} else if (key !== '_populate') {
-					conditions.push(`${key} = ?`);
+				} else if (key !== '_populate' && ALLOWED_QUERY.has(key)) {
+					conditions.push(`${key} = ?`); // ALLOWED
 					params.push(query[key]);
 				}
 			});
@@ -114,21 +115,27 @@ const CaddyConfigSQLiteModel = {
 		const db = getDB();
 		const existingConfig = this.findById(id);
 		if (!existingConfig) return null;
+		// ALLOWED whitelist — prevents SQL column injection
+		const { filterUpdateData } = require('../../utils/sql');
+		const safeData = filterUpdateData('caddy_configs', updateData);
+		if (Object.keys(safeData).length === 0 && Object.keys(updateData).length > 0) {
+			throw new Error('No valid fields to update');
+		}
 
 		const updateFields = [];
 		const updateValues = [];
 		
-		Object.keys(updateData).forEach(key => {
+		Object.keys(safeData).forEach(key => {
 			if (key === 'servers' || key === 'jsonConfig' || key === 'metadata' || key === 'history') {
-				updateFields.push(`${key} = ?`);
-				updateValues.push(JSON.stringify(updateData[key]));
-			} else if (typeof updateData[key] === 'object' && updateData[key] !== null) {
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(JSON.stringify(safeData[key]));
+			} else if (typeof safeData[key] === 'object' && safeData[key] !== null) {
 				// For other objects, stringify them
-				updateFields.push(`${key} = ?`);
-				updateValues.push(JSON.stringify(updateData[key]));
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(JSON.stringify(safeData[key]));
 			} else {
-				updateFields.push(`${key} = ?`);
-				updateValues.push(updateData[key]);
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(safeData[key]);
 			}
 		});
 

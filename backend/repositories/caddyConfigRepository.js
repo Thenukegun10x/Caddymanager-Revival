@@ -124,11 +124,14 @@ const caddyConfigRepository = {
    * @returns {Promise<Object|null>} - Updated configuration or null
    */
   async findByIdAndUpdate(id, updateData, options = {}) {
-    if (typeof CaddyConfigModel.findByIdAndUpdate === 'function') {
-      // Mongoose
-      return CaddyConfigModel.findByIdAndUpdate(id, updateData, options);
+    const { filterUpdateData } = require('../utils/sql');
+    const safeData = filterUpdateData('caddy_configs', updateData);
+    if (Object.keys(safeData).length === 0 && Object.keys(updateData).length > 0) {
+      throw new Error('No valid fields to update');
     }
-    
+    if (typeof CaddyConfigModel.findByIdAndUpdate === 'function' && process.env.DB_ENGINE === 'mongodb') {
+      return CaddyConfigModel.findByIdAndUpdate(id, safeData, options);
+    }
     // SQLite - implement update logic
     const db = require('../services/sqliteService').getDB();
     const existingConfig = await this.findById(id);
@@ -137,13 +140,13 @@ const caddyConfigRepository = {
     const updateFields = [];
     const updateValues = [];
     
-    Object.keys(updateData).forEach(key => {
+    Object.keys(safeData).forEach(key => {
       if (key === 'servers' || key === 'jsonConfig' || key === 'metadata' || key === 'history') {
-        updateFields.push(`${key} = ?`);
-        updateValues.push(JSON.stringify(updateData[key]));
+        updateFields.push(`${key} = ?`); // ALLOWED
+        updateValues.push(JSON.stringify(safeData[key]));
       } else {
-        updateFields.push(`${key} = ?`);
-        updateValues.push(updateData[key]);
+        updateFields.push(`${key} = ?`); // ALLOWED
+        updateValues.push(safeData[key]);
       }
     });
 

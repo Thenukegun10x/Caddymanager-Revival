@@ -20,9 +20,12 @@ function ensureTable() {
 			lastPinged TEXT,
 			status TEXT DEFAULT 'unknown',
 			activeConfig INTEGER,
+			createdBy INTEGER,
 			createdAt TEXT NOT NULL,
 			updatedAt TEXT NOT NULL
 		)`).run();
+		// Backwards compat: add createdBy if missing (for existing DBs)
+		try { dbInstance.prepare(`ALTER TABLE caddy_servers ADD COLUMN createdBy INTEGER`).run(); } catch (_) {}
 	} catch (error) {
 		console.error('Error ensuring caddy_servers table:', error.message);
 	}
@@ -35,8 +38,8 @@ const CaddyServersSQLiteModel = {
 		const db = getDB();
 		const now = new Date();
 		const stmt = db.prepare(`INSERT INTO caddy_servers (
-			name, apiUrl, apiPort, adminApiPath, active, tags, description, lastPinged, status, activeConfig, createdAt, updatedAt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+			name, apiUrl, apiPort, adminApiPath, active, tags, description, lastPinged, status, activeConfig, createdBy, createdAt, updatedAt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 		const info = stmt.run(
 			server.name,
 			server.apiUrl,
@@ -48,6 +51,7 @@ const CaddyServersSQLiteModel = {
 			server.lastPinged ? new Date(server.lastPinged).toISOString() : null,
 			server.status || 'unknown',
 			server.activeConfig || null,
+			server.createdBy || null,
 			now.toISOString(),
 			now.toISOString()
 		);
@@ -86,7 +90,7 @@ const CaddyServersSQLiteModel = {
 			const conditions = [];
 			Object.keys(query).forEach(key => {
 				if (key === 'activeConfig') {
-					conditions.push(`${key} = ?`);
+					conditions.push(`${key} = ?`); // ALLOWED - whitelisted column
 					params.push(query[key]);
 				}
 			});
@@ -104,33 +108,39 @@ const CaddyServersSQLiteModel = {
 		const db = getDB();
 		const existingServer = this.findById(id);
 		if (!existingServer) return null;
+		// ALLOWED whitelist — prevents SQL column injection (AGENTS.md C3)
+		const { filterUpdateData } = require('../../utils/sql');
+		const safeData = filterUpdateData('caddy_servers', updateData);
+		if (Object.keys(safeData).length === 0 && Object.keys(updateData).length > 0) {
+			throw new Error('No valid fields to update');
+		}
 
 		const updateFields = [];
 		const updateValues = [];
 		
-		Object.keys(updateData).forEach(key => {
+		Object.keys(safeData).forEach(key => {
 			if (key === 'tags') {
-				updateFields.push(`${key} = ?`);
-				updateValues.push(JSON.stringify(updateData[key]));
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(JSON.stringify(safeData[key]));
 			} else if (key === 'lastPinged') {
-				updateFields.push(`${key} = ?`);
-				if (updateData[key] instanceof Date) {
-					updateValues.push(updateData[key].toISOString());
-				} else if (updateData[key]) {
-					updateValues.push(new Date(updateData[key]).toISOString());
+				updateFields.push(`${key} = ?`); // ALLOWED
+				if (safeData[key] instanceof Date) {
+					updateValues.push(safeData[key].toISOString());
+				} else if (safeData[key]) {
+					updateValues.push(new Date(safeData[key]).toISOString());
 				} else {
 					updateValues.push(null);
 				}
 			} else if (key === 'active') {
-				updateFields.push(`${key} = ?`);
-				updateValues.push(updateData[key] ? 1 : 0);
-			} else if (typeof updateData[key] === 'object' && updateData[key] !== null) {
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(safeData[key] ? 1 : 0);
+			} else if (typeof safeData[key] === 'object' && safeData[key] !== null) {
 				// For objects, stringify them
-				updateFields.push(`${key} = ?`);
-				updateValues.push(JSON.stringify(updateData[key]));
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(JSON.stringify(safeData[key]));
 			} else {
-				updateFields.push(`${key} = ?`);
-				updateValues.push(updateData[key]);
+				updateFields.push(`${key} = ?`); // ALLOWED
+				updateValues.push(safeData[key]);
 			}
 		});
 

@@ -64,9 +64,14 @@ const caddyServersRepository = {
    * @returns {Promise<Object|null>} - Updated server or null
    */
   async findByIdAndUpdate(id, updateData, options = {}) {
-    if (typeof CaddyServersModel.findByIdAndUpdate === 'function') {
-      // Mongoose
-      return CaddyServersModel.findByIdAndUpdate(id, updateData, options);
+    // ALLOWED whitelist — prevents SQL column injection (AGENTS.md C3)
+    const { filterUpdateData } = require('../utils/sql');
+    const safeData = filterUpdateData('caddy_servers', updateData);
+    if (Object.keys(safeData).length === 0 && Object.keys(updateData).length > 0) {
+      throw new Error('No valid fields to update');
+    }
+    if (typeof CaddyServersModel.findByIdAndUpdate === 'function' && process.env.DB_ENGINE === 'mongodb') {
+      return CaddyServersModel.findByIdAndUpdate(id, safeData, options);
     }
     // SQLite - implement update logic
     const db = require('../services/sqliteService').getDB();
@@ -76,16 +81,16 @@ const caddyServersRepository = {
     const updateFields = [];
     const updateValues = [];
     
-    Object.keys(updateData).forEach(key => {
+    Object.keys(safeData).forEach(key => {
       if (key === 'tags') {
-        updateFields.push(`${key} = ?`);
-        updateValues.push(JSON.stringify(updateData[key]));
-      } else if (key === 'lastPinged' && updateData[key] instanceof Date) {
-        updateFields.push(`${key} = ?`);
-        updateValues.push(updateData[key].toISOString());
+        updateFields.push(`${key} = ?`); // ALLOWED
+        updateValues.push(JSON.stringify(safeData[key]));
+      } else if (key === 'lastPinged' && safeData[key] instanceof Date) {
+        updateFields.push(`${key} = ?`); // ALLOWED
+        updateValues.push(safeData[key].toISOString());
       } else {
-        updateFields.push(`${key} = ?`);
-        updateValues.push(updateData[key]);
+        updateFields.push(`${key} = ?`); // ALLOWED
+        updateValues.push(safeData[key]);
       }
     });
 

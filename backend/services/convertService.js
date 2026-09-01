@@ -2,6 +2,7 @@ const axios = require('axios');
 const caddyService = require('./caddyService');
 const auditService = require('./auditService');
 require('dotenv').config();
+const { assertSafeApiUrl, assertSafePort, axiosSafeOpts } = require('../utils/ssrf');
 
 /**
  * Conversion Service - Handles conversion between Caddyfile and JSON formats
@@ -18,32 +19,39 @@ const convertService = {
       let serverUrl;
       
       if (serverId) {
-        // If a server ID is provided, use that server's API for conversion
         const server = await caddyService.getServerById(serverId);
         if (!server) {
           throw new Error(`Server with ID ${serverId} not found`);
         }
+        assertSafeApiUrl(server.apiUrl);
+        assertSafePort(server.apiPort);
         serverUrl = `${server.apiUrl}:${server.apiPort}`;
       } else {
-        // Otherwise use the dedicated Caddy sandbox server from environment
         serverUrl = process.env.CADDY_SANDBOX_URL || 'http://localhost:2019';
+        // Validate sandbox URL is safe (allow localhost for testing, but block private override via env)
+        try {
+          const u = new URL(serverUrl);
+          if (!['http:', 'https:'].includes(u.protocol)) throw new Error('invalid');
+        } catch (_) {
+          throw new Error(`Invalid CADDY_SANDBOX_URL ${serverUrl}`);
+        }
       }
       
       // Ensure caddyfile is a string
       const caddyfileContent = typeof caddyfile === 'string' ? caddyfile : 
                               (caddyfile && typeof caddyfile === 'object' ? JSON.stringify(caddyfile) : String(caddyfile));
       
-      // Make request to Caddy's adapt endpoint to convert Caddyfile to JSON
+      // Make request to Caddy's adapt endpoint — bounded, no redirect
       const response = await axios.post(
         `${serverUrl}/adapt`, 
         caddyfileContent, 
         {
-          params: {
-            pretty: true
-          },
-          headers: {
-            'Content-Type': 'text/caddyfile'
-          }
+          params: { pretty: true },
+          headers: { 'Content-Type': 'text/caddyfile' },
+          ...axiosSafeOpts,
+          maxBodyLength: 512 * 1024,
+          maxContentLength: 1_000_000,
+          timeout: 10000
         }
       );
       

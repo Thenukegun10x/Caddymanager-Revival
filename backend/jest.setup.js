@@ -5,6 +5,8 @@ require('dotenv').config({ path: '.env.test' });
 process.env.DB_ENGINE = process.env.DB_ENGINE || 'sqlite';
 process.env.SQLITE_DB_PATH = ':memory:'; // Use in-memory SQLite for tests
 process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-for-ci-only-not-for-prod';
+process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRATION || '1h';
 
 // Initialize SQLite service for tests
 if (process.env.DB_ENGINE === 'sqlite') {

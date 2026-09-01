@@ -91,9 +91,9 @@ describe('CaddyController', () => {
 
   describe('getServerById', () => {
     it('should return server by ID successfully', async () => {
-      const mockServer = { id: '1', name: 'Test Server', apiUrl: 'http://localhost', apiPort: 2019 };
+      const mockServer = { id: '1', _id: '1', name: 'Test Server', apiUrl: 'http://localhost', apiPort: 2019 };
 
-      caddyService.getServerById.mockResolvedValue(mockServer);
+      caddyServersRepository.findById.mockResolvedValue(mockServer);
 
       const response = await request(app)
         .get('/servers/1')
@@ -104,11 +104,11 @@ describe('CaddyController', () => {
         data: mockServer
       });
 
-      expect(caddyService.getServerById).toHaveBeenCalledWith('1');
+      expect(caddyServersRepository.findById).toHaveBeenCalledWith('1');
     });
 
     it('should return 404 for non-existent server', async () => {
-      caddyService.getServerById.mockResolvedValue(null);
+      caddyServersRepository.findById.mockResolvedValue(null);
 
       const response = await request(app)
         .get('/servers/999')
@@ -130,7 +130,7 @@ describe('CaddyController', () => {
         adminApiPath: '/config/'
       };
 
-      const mockCreatedServer = { _id: 'new-server-id', ...serverData };
+      const mockCreatedServer = { _id: 'new-server-id', ...serverData, createdBy: 'test-user-id' };
 
       caddyService.addServer.mockResolvedValue(mockCreatedServer);
       auditService.logAction.mockResolvedValue({});
@@ -146,7 +146,7 @@ describe('CaddyController', () => {
         data: mockCreatedServer
       });
 
-      expect(caddyService.addServer).toHaveBeenCalledWith(serverData);
+      expect(caddyService.addServer).toHaveBeenCalledWith(expect.objectContaining({ ...serverData, createdBy: 'test-user-id' }));
       expect(auditService.logAction).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'add_server',
@@ -187,7 +187,9 @@ describe('CaddyController', () => {
     it('should update server successfully', async () => {
       const updateData = { name: 'Updated Server Name' };
       const mockUpdatedServer = { _id: 'server-id', name: 'Updated Server Name' };
+      const mockExisting = { _id: 'server-id', id: 'server-id', name: 'Old', createdBy: 'test-user-id' };
 
+      caddyServersRepository.findById.mockResolvedValue(mockExisting);
       caddyService.updateServer.mockResolvedValue(mockUpdatedServer);
       auditService.logAction.mockResolvedValue({});
 
@@ -213,7 +215,7 @@ describe('CaddyController', () => {
     });
 
     it('should return 404 for non-existent server', async () => {
-      caddyService.updateServer.mockResolvedValue(null);
+      caddyServersRepository.findById.mockResolvedValue(null);
 
       const response = await request(app)
         .put('/servers/999')
@@ -230,7 +232,9 @@ describe('CaddyController', () => {
   describe('deleteServer', () => {
     it('should delete server successfully', async () => {
       const mockDeletedServer = { _id: 'server-id', name: 'Deleted Server', apiUrl: 'http://localhost' };
+      const mockExisting = { _id: 'server-id', id: 'server-id', name: 'Deleted Server', createdBy: 'test-user-id' };
 
+      caddyServersRepository.findById.mockResolvedValue(mockExisting);
       caddyService.deleteServer.mockResolvedValue(mockDeletedServer);
       auditService.logAction.mockResolvedValue({});
 
@@ -255,7 +259,7 @@ describe('CaddyController', () => {
     });
 
     it('should return 404 for non-existent server', async () => {
-      caddyService.deleteServer.mockResolvedValue(null);
+      caddyServersRepository.findById.mockResolvedValue(null);
 
       const response = await request(app)
         .delete('/servers/999')
@@ -313,9 +317,6 @@ describe('CaddyController', () => {
     });
 
     it('should return 404 when server not found', async () => {
-      const statusResult = { status: 'online', lastPinged: new Date() };
-
-      caddyService.checkServerStatus.mockResolvedValue(statusResult);
       caddyServersRepository.findById.mockResolvedValue(null);
 
       const response = await request(app)
@@ -324,7 +325,7 @@ describe('CaddyController', () => {
 
       expect(response.body).toEqual({
         success: false,
-        message: 'Server not found'
+        message: 'Caddy server not found'
       });
     });
   });

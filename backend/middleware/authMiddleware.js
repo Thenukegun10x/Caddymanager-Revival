@@ -2,8 +2,20 @@ const jwt = require('jsonwebtoken');
 const userRepository = require('../repositories/userRepository');
 const ApiKey = require('../models/apiKey');
 
-// Environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_for_development';
+// Environment variables — fail fast if JWT_SECRET not set (except test)
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'test') return 'test-jwt-secret-for-ci-only-not-for-prod';
+    throw new Error('JWT_SECRET must be set — refusing to start with insecure default (see AGENTS.md §4)');
+  }
+  return secret;
+}
+// Fail fast at import in non-test so app does not boot with insecure default
+if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
+  throw new Error('JWT_SECRET environment variable is required');
+}
+const JWT_SECRET = process.env.JWT_SECRET; // kept for backwards compat, but getJwtSecret() is canonical
 
 // Protect routes - supports both JWT and API key authentication
 exports.protect = async (req, res, next) => {
@@ -13,9 +25,10 @@ exports.protect = async (req, res, next) => {
     
     // Check if token exists in headers
     if (req.headers.authorization) {
-      // Check if it's a Bearer token (JWT)
-      if (req.headers.authorization.startsWith('Bearer')) {
-        token = req.headers.authorization.split(' ')[1];
+      // Check if it's a Bearer token (JWT) — require "Bearer " with space
+      if (req.headers.authorization.startsWith('Bearer ')) {
+        const parts = req.headers.authorization.split(' ');
+        if (parts.length === 2 && parts[1]) token = parts[1];
       } 
       // Check if it's an API key
       else if (req.headers.authorization.startsWith('ApiKey')) {
@@ -74,8 +87,8 @@ exports.protect = async (req, res, next) => {
           }
         };
       } else {
-        // Verify JWT
-        const decoded = jwt.verify(token, JWT_SECRET);
+        // Verify JWT — enforce HS256, no fallback secret
+        const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
         
         // Check if user still exists
         const user = await userRepository.findById(decoded.id);

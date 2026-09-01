@@ -124,7 +124,9 @@ const apiKeyRepository = {
         ...options 
       });
       if (res && typeof res.select === 'function') {
-        return await res.select('-key').lean().exec();
+        const q = res.select('-key').lean();
+        if (typeof q.exec === 'function') return await q.exec();
+        return await q;
       }
       return await res;
     }

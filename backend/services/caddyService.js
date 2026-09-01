@@ -2,6 +2,7 @@ const axios = require('axios');
 const caddyServersRepository = require('../repositories/caddyServersRepository');
 const caddyConfigRepository = require('../repositories/caddyConfigRepository');
 require('dotenv').config();
+const { assertSafeServerConfig, buildSafeBaseUrl, assertSafeAdminApiPath, axiosSafeOpts } = require('../utils/ssrf');
 
 /**
  * Service for interacting with the Caddy API
@@ -13,18 +14,15 @@ class CaddyService {
    * @returns {Object} - Configured axios instance
    */
   createAxiosInstance(serverConfig) {
-    const baseURL = `${serverConfig.apiUrl}:${serverConfig.apiPort}`;
-    
+    assertSafeServerConfig(serverConfig);
+    const baseURL = buildSafeBaseUrl(serverConfig);
     const config = {
       baseURL,
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 10000 // 10 seconds timeout
+      ...axiosSafeOpts,
     };
-
-    // No authentication logic
-
     return axios.create(config);
   }
 
@@ -42,10 +40,9 @@ class CaddyService {
    * @returns {Promise<Object>} - Created server object
    */
   async addServer(serverData) {
-    // Create new server instance
+    // Validate SSRF inputs before saving (AGENTS.md §7)
+    assertSafeServerConfig(serverData);
     const newServer = { ...serverData };
-    
-    // Test connection before saving
     try {
       await this.testServerConnection(newServer);
       newServer.status = 'online';
@@ -53,7 +50,6 @@ class CaddyService {
     } catch (err) {
       newServer.status = 'offline';
     }
-    
     return await caddyServersRepository.create(newServer);
   }
 
@@ -64,6 +60,12 @@ class CaddyService {
    * @returns {Promise<Object>} - Updated server object
    */
   async updateServer(serverId, updateData) {
+    // Validate any SSRF fields present in update
+    if (updateData.apiUrl !== undefined || updateData.apiPort !== undefined || updateData.adminApiPath !== undefined) {
+      const current = await caddyServersRepository.findById(serverId);
+      const merged = { ...(current || {}), ...updateData };
+      assertSafeServerConfig(merged);
+    }
     return await caddyServersRepository.findByIdAndUpdate(
       serverId, 
       updateData, 
@@ -86,9 +88,9 @@ class CaddyService {
    * @returns {Promise<Object>} - Response from the server
    */
   async testServerConnection(serverConfig) {
+    assertSafeServerConfig(serverConfig);
     const axiosInstance = this.createAxiosInstance(serverConfig);
     try {
-      // Using the standard Caddy admin endpoint for config
       const response = await axiosInstance.get('/config/');
       return response.data;
     } catch (error) {
@@ -107,7 +109,7 @@ class CaddyService {
     if (!server) {
       throw new Error('Server not found');
     }
-    
+    assertSafeAdminApiPath(server.adminApiPath);
     const axiosInstance = this.createAxiosInstance(server);
     try {
       const response = await axiosInstance.get(server.adminApiPath);
@@ -128,7 +130,7 @@ class CaddyService {
     if (!server) {
       throw new Error('Server not found');
     }
-    
+    assertSafeAdminApiPath(server.adminApiPath);
     const axiosInstance = this.createAxiosInstance(server);
     try {
       const response = await axiosInstance.post(server.adminApiPath, configData);
@@ -207,16 +209,14 @@ class CaddyService {
    * @returns {string} - The command to run
    */
   
-  // THIS NEEDS TO BE REWORKED
   generateCaddyStartCommand(serverConfig) {
+    // Escape shell metachars to avoid injection when displayed in UI
+    const esc = (s) => String(s).replace(/[^A-Za-z0-9_\-.\/:]/g, '_');
     let command = 'caddy run';
-    
     if (serverConfig.configFilePath) {
-      command += ` --config ${serverConfig.configFilePath}`;
+      command += ` --config ${esc(serverConfig.configFilePath)}`;
     }
-    
-    command += ` --admin ${serverConfig.apiUrl.replace(/^https?:\/\//, '')}:${serverConfig.apiPort}`;
-    
+    command += ` --admin ${esc(serverConfig.apiUrl.replace(/^https?:\/\//, ''))}:${esc(String(serverConfig.apiPort))}`;
     return command;
   }
 
@@ -226,8 +226,10 @@ class CaddyService {
    * @returns {string} - Docker Compose file content
    */
 
-  // THIS NEEDS TO BE REWORKED
   generateDockerComposeFile(serverConfig) {
+    // Validate port is numeric to avoid YAML injection
+    const port = String(serverConfig.apiPort).replace(/[^0-9]/g, '');
+    if (!port || Number(port) < 1 || Number(port) > 65535) throw new Error('Invalid apiPort for compose');
     return `version: "3.9"
 
 services:
@@ -237,14 +239,14 @@ services:
     entrypoint: >
       sh -c "
         # Configure the Caddy admin API before startup
-        echo '{\n          admin 0.0.0.0:${serverConfig.apiPort}\n        }' > /etc/caddy/admin-conf.json &&
+        echo '{\n          admin 0.0.0.0:${port}\n        }' > /etc/caddy/admin-conf.json &&
         # Start Caddy with the JSON config mounted as volume
         caddy run"
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
-      - "${serverConfig.apiPort}:${serverConfig.apiPort}"
+      - "${port}:${port}"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -669,7 +671,9 @@ volumes:
     if (!server) {
       throw new Error('Server not found');
     }
-    
+    if (typeof filePath !== 'string' || filePath.includes('..')) {
+      throw new Error('Invalid filePath');
+    }
     const axiosInstance = this.createAxiosInstance(server);
     try {
       const encodedPath = encodeURIComponent(filePath);

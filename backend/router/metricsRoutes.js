@@ -1,6 +1,10 @@
 const express = require('express')
 const router = express.Router()
 const metricsController = require('../controllers/metricsController')
+const { protect, authorize } = require('../middleware/authMiddleware')
+
+// Protect all metrics — H1 fix (was public, leaked inventory)
+router.use(protect)
 
 /**
  * @openapi
@@ -107,7 +111,7 @@ router.get('/history/series/:metric', metricsController.getHistorySeries)
  *       200:
  *         description: Operation result
  */
-router.delete('/history', metricsController.clearHistory)
+router.delete('/history', authorize('admin'), metricsController.clearHistory)
 
 /**
  * @openapi

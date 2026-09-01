@@ -1,6 +1,23 @@
 const caddyService = require('../services/caddyService');
 const caddyServersRepository = require('../repositories/caddyServersRepository');
 const auditService = require('../services/auditService');
+const { assertSafeApiUrl, assertSafePort, assertSafeAdminApiPath } = require('../utils/ssrf');
+
+// RBAC helper — allows admin always, otherwise checks createdBy (if present)
+async function checkServerOwnership(req, res) {
+  const serverId = req.params.id;
+  const server = await caddyServersRepository.findById(serverId);
+  if (!server) {
+    res.status(404).json({ success: false, message: 'Caddy server not found' });
+    return null;
+  }
+  // If createdBy is set, enforce ownership unless admin
+  if (server.createdBy && String(server.createdBy) !== String(req.user.id) && req.user.role !== 'admin') {
+    res.status(403).json({ success: false, message: 'Not authorized for this server' });
+    return null;
+  }
+  return server;
+}
 
 /**
  * Caddy Controller - Handles all HTTP requests related to Caddy servers
@@ -36,15 +53,8 @@ const caddyController = {
    */
   getServerById: async (req, res) => {
     try {
-      const serverId = req.params.id;
-      const server = await caddyService.getServerById(serverId);
-      
-      if (!server) {
-        return res.status(404).json({
-          success: false,
-          message: 'Caddy server not found'
-        });
-      }
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       
       res.status(200).json({
         success: true,
@@ -69,7 +79,16 @@ const caddyController = {
     try {
       const serverData = req.body;
       const pullExistingConfig = req.body.pullExistingConfig === true;
-      
+      // Validate SSRF fields before any network call
+      try {
+        if (serverData.apiUrl) assertSafeApiUrl(serverData.apiUrl);
+        if (serverData.apiPort) assertSafePort(serverData.apiPort);
+        if (serverData.adminApiPath) assertSafeAdminApiPath(serverData.adminApiPath);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: e.message });
+      }
+      // Set ownership
+      serverData.createdBy = req.user.id;
       // Remove flags that shouldn't be saved to database
       delete serverData.pullExistingConfig;
       
@@ -146,8 +165,18 @@ const caddyController = {
    */
   updateServer: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const updateData = req.body;
+      // Whitelist SSRF fields validation — block private hosts early
+      try {
+        if (updateData.apiUrl !== undefined) assertSafeApiUrl(updateData.apiUrl);
+        if (updateData.apiPort !== undefined) assertSafePort(updateData.apiPort);
+        if (updateData.adminApiPath !== undefined) assertSafeAdminApiPath(updateData.adminApiPath);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: e.message });
+      }
       
       const updatedServer = await caddyService.updateServer(serverId, updateData);
       
@@ -195,6 +224,8 @@ const caddyController = {
    */
   deleteServer: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const deletedServer = await caddyService.deleteServer(serverId);
       
@@ -243,6 +274,13 @@ const caddyController = {
   testConnection: async (req, res) => {
     try {
       const serverConfig = req.body;
+      try {
+        if (serverConfig.apiUrl) assertSafeApiUrl(serverConfig.apiUrl);
+        if (serverConfig.apiPort) assertSafePort(serverConfig.apiPort);
+        if (serverConfig.adminApiPath) assertSafeAdminApiPath(serverConfig.adminApiPath);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: e.message });
+      }
       const result = await caddyService.testServerConnection(serverConfig);
       
       res.status(200).json({
@@ -267,6 +305,8 @@ const caddyController = {
    */
   getConfig: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const config = await caddyService.getConfig(serverId);
       
@@ -292,6 +332,8 @@ const caddyController = {
    */
   updateConfig: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const configData = req.body;
       
@@ -334,6 +376,8 @@ const caddyController = {
    */
   loadConfig: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const configJson = req.body;
       
@@ -422,20 +466,12 @@ const caddyController = {
    */
   async checkServerStatus(req, res) {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const { id } = req.params;
       
       // Get server status
       const statusResult = await caddyService.checkServerStatus(id);
-      
-      // Get complete server data to include all necessary fields for the frontend
-      const server = await caddyServersRepository.findById(id);
-      
-      if (!server) {
-        return res.status(404).json({
-          success: false,
-          message: 'Server not found'
-        });
-      }
       
       res.status(200).json({
         success: true,
@@ -467,15 +503,8 @@ const caddyController = {
    */
   generateStartCommand: async (req, res) => {
     try {
-      const serverId = req.params.id;
-      const server = await caddyService.getServerById(serverId);
-      
-      if (!server) {
-        return res.status(404).json({
-          success: false,
-          message: 'Caddy server not found'
-        });
-      }
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       
       const command = caddyService.generateCaddyStartCommand(server);
       
@@ -504,15 +533,8 @@ const caddyController = {
    */
   generateDockerComposeFile: async (req, res) => {
     try {
-      const serverId = req.params.id;
-      const server = await caddyService.getServerById(serverId);
-      
-      if (!server) {
-        return res.status(404).json({
-          success: false,
-          message: 'Caddy server not found'
-        });
-      }
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       
       const dockerComposeContent = caddyService.generateDockerComposeFile(server);
       
@@ -539,15 +561,8 @@ const caddyController = {
    */
   generateDockerDeployment: async (req, res) => {
     try {
-      const serverId = req.params.id;
-      const server = await caddyService.getServerById(serverId);
-      
-      if (!server) {
-        return res.status(404).json({
-          success: false,
-          message: 'Caddy server not found'
-        });
-      }
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       
       // Create a ZIP file with Docker Compose
       const files = {
@@ -583,6 +598,8 @@ const caddyController = {
    */
   getConfigsForServer: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const { status } = req.query;
       
@@ -791,6 +808,8 @@ const caddyController = {
    */
   getCurrentRunningConfig: async (req, res) => {
     try {
+      const server = await checkServerOwnership(req, res);
+      if (!server) return;
       const serverId = req.params.id;
       const options = {
         skipSaveConfig: req.query.skipSave === 'true', // Use this to determine whether to save in the database

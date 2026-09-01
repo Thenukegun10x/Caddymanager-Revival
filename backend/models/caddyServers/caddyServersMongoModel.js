@@ -41,6 +41,12 @@ const caddyServerSchema = new mongoose.Schema({
     enum: ['online', 'offline', 'unknown'],
     default: 'unknown'
   },
+  // Ownership — who created this server (RBAC, AGENTS.md C4)
+  createdBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
   // Reference to the active configuration
   activeConfig: {
     type: Schema.Types.ObjectId,

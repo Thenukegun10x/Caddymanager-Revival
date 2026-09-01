@@ -153,19 +153,21 @@ const UserSQLiteModel = {
 	async findByIdAndUpdate(id, updateData, options = {}) {
 		const db = getDB();
 		const now = new Date().toISOString();
-		
+		// ALLOWED whitelist — prevent column injection
+		const { filterUpdateData } = require('../../utils/sql');
+		let safeData = filterUpdateData('users', updateData);
 		// If password is being updated, hash it
-		if (updateData.password) {
+		if (safeData.password) {
 			const salt = await bcrypt.genSalt(10);
-			updateData.password = await bcrypt.hash(updateData.password, salt);
+			safeData.password = await bcrypt.hash(safeData.password, salt);
 		}
 
 		const fields = [];
 		const values = [];
 		
-		for (const [key, value] of Object.entries(updateData)) {
+		for (const [key, value] of Object.entries(safeData)) {
 			if (key !== 'id') {
-				fields.push(`${key} = ?`);
+				fields.push(`${key} = ?`); // ALLOWED
 				values.push(value);
 			}
 		}
