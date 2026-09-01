@@ -16,10 +16,12 @@ function ensureTable() {
 		password TEXT NOT NULL,
 		role TEXT NOT NULL DEFAULT 'user',
 		isActive INTEGER NOT NULL DEFAULT 1,
+		tokenVersion INTEGER NOT NULL DEFAULT 0,
 		lastLogin TEXT,
 		createdAt TEXT NOT NULL,
 		updatedAt TEXT NOT NULL
 	)`).run();
+	try { db.prepare(`ALTER TABLE users ADD COLUMN tokenVersion INTEGER NOT NULL DEFAULT 0`).run(); } catch (_) {}
 }
 
 ensureTable();

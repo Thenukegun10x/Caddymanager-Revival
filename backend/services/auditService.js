@@ -142,6 +142,35 @@ const auditService = {
       return auditLogRepository.getUniqueUsers(limit);
     }
     return [];
+  },
+
+  /**
+   * Cleanup old audit logs based on retention (Set D)
+   */
+  async cleanupOldLogs() {
+    const days = parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '90', 10);
+    if (!days || days <= 0) return 0;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const cutoffIso = cutoff.toISOString();
+    try {
+      if ((process.env.DB_ENGINE || 'sqlite') === 'mongodb') {
+        const AuditLog = require('../models/auditLog');
+        const res = await AuditLog.deleteMany({ timestamp: { $lt: cutoff } });
+        if (res.deletedCount > 0) console.log(`[audit] cleaned ${res.deletedCount} logs older than ${days}d`);
+        return res.deletedCount;
+      } else {
+        const db = require('./sqliteService').getDB();
+        if (!db) return 0;
+        // Ensure table exists before delete
+        try { db.prepare(`SELECT 1 FROM audit_logs LIMIT 1`).get(); } catch { return 0; }
+        const info = db.prepare(`DELETE FROM audit_logs WHERE timestamp < ?`).run(cutoffIso);
+        if (info.changes > 0) console.log(`[audit] cleaned ${info.changes} logs older than ${days}d`);
+        return info.changes;
+      }
+    } catch (e) {
+      console.warn(`[audit] cleanup failed: ${e.message}`);
+      return 0;
+    }
   }
 };
 

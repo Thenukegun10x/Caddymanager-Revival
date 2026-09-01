@@ -10,6 +10,9 @@ function getApiClient() {
   const apiClient = axios.create({
     baseURL: config.API.BASE_URL, // getter, always up-to-date
     timeout: config.API.TIMEOUT,
+    maxContentLength: 5 * 1024 * 1024,
+    maxBodyLength: 5 * 1024 * 1024,
+    withCredentials: true,
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json'

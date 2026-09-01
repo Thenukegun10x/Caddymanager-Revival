@@ -42,6 +42,11 @@ exports.protect = async (req, res, next) => {
       token = req.headers['x-api-key'];
       isApiKey = true;
     }
+
+    // Also check httpOnly cookie (Set D, mitigates XSS)
+    if (!token && req.cookies && req.cookies.auth_token) {
+      token = req.cookies.auth_token;
+    }
     
     // Check if token exists
     if (!token) {
@@ -104,6 +109,14 @@ exports.protect = async (req, res, next) => {
           return res.status(401).json({
             success: false,
             message: 'User account is disabled'
+          });
+        }
+
+        // Check tokenVersion rotation (Set D) — invalidates old JWTs after password change
+        if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
+          return res.status(401).json({
+            success: false,
+            message: 'Token has been invalidated (password changed)'
           });
         }
         

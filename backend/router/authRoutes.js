@@ -74,6 +74,8 @@ router.post('/login', validate(loginSchema), authController.login);
 // Protected routes - require authentication
 router.use(protect);
 
+router.post('/logout', authController.logout);
+
 /**
  * @swagger
  * /api/v1/auth/me:

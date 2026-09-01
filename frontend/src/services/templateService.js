@@ -16,15 +16,16 @@ import emptyTemplate from '@/assets/templates/configurations/empty.json';
  * @param {*} obj - Object to clone
  * @returns {*} Cloned object
  */
-function deepClone(obj) {
+function deepClone(obj, depth = 0, maxDepth = 50) {
+  if (depth > maxDepth) throw new Error('Maximum clone depth exceeded');
   if (obj === null || typeof obj !== 'object') return obj;
   if (obj instanceof Date) return new Date(obj.getTime());
-  if (obj instanceof Array) return obj.map(item => deepClone(item));
+  if (obj instanceof Array) return obj.map(item => deepClone(item, depth + 1, maxDepth));
   if (typeof obj === 'object') {
     const clonedObj = {};
     for (const key in obj) {
       if (obj.hasOwnProperty(key)) {
-        clonedObj[key] = deepClone(obj[key]);
+        clonedObj[key] = deepClone(obj[key], depth + 1, maxDepth);
       }
     }
     return clonedObj;

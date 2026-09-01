@@ -16,9 +16,9 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
 }
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRATION || '24h';
 
-// Generate JWT token — enforce HS256
-const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, getJwtSecret(), {
+// Generate JWT token — enforce HS256, include tokenVersion for rotation
+const generateToken = (userId, tokenVersion = 0) => {
+  return jwt.sign({ id: userId, tokenVersion }, getJwtSecret(), {
     expiresIn: JWT_EXPIRES_IN,
     algorithm: 'HS256'
   });
@@ -80,8 +80,17 @@ exports.login = async (req, res) => {
     // Update last login time
     const updatedUser = await userRepository.updateLastLogin(user.id || user._id, new Date());
 
-    // Generate token
-    const token = generateToken(user.id || user._id);
+    // Generate token with current tokenVersion
+    const token = generateToken(user.id || user._id, user.tokenVersion || 0);
+
+    // Set httpOnly cookie (for frontend withCredentials, mitigates XSS steal)
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 24 * 60 * 60 * 1000
+    });
 
     // Log successful login
     await auditService.logAction({
@@ -97,7 +106,7 @@ exports.login = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // Send response
+    // Send response (still return token for backwards compat, but frontend should use cookie)
     res.status(200).json({
       success: true,
       token,
@@ -116,6 +125,16 @@ exports.login = async (req, res) => {
       error: error.message
     });
   }
+};
+
+exports.logout = async (req, res) => {
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/'
+  });
+  res.json({ success: true, message: 'Logged out' });
 };
 
 // Get current user profile
@@ -254,8 +273,9 @@ exports.changePassword = async (req, res) => {
       });
     }
     
-    // Update password
-    await userRepository.findByIdAndUpdate(user.id || user._id, { password: newPassword });
+    // Update password and rotate tokenVersion (invalidates old JWTs)
+    const newVersion = (user.tokenVersion || 0) + 1;
+    await userRepository.findByIdAndUpdate(user.id || user._id, { password: newPassword, tokenVersion: newVersion });
     
     // Log password change
     await auditService.logAction({

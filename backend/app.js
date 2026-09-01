@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpecs = require('./config/swagger');
@@ -47,6 +48,7 @@ const corsOptions = {
   allowedHeaders: ['Content-Type','Authorization','X-API-Key']
 };
 app.use(cors(corsOptions));
+app.use(cookieParser());
 app.use(helmet({ contentSecurityPolicy: false, hsts: { maxAge: 31536000, includeSubDomains: true } }));
 // Rate limiting — generous in test, strict in prod (AGENTS.md §7 H7)
 const isTest = process.env.NODE_ENV === 'test';
@@ -98,6 +100,13 @@ app.use('/', routes);
 // Start the ping service
 const pingServiceStatus = pingService.startPingService();
 console.log(`Ping service initialized: ${JSON.stringify(pingServiceStatus)}`);
+
+// Audit retention cleanup (Set D)
+try {
+  const auditService = require('./services/auditService');
+  auditService.cleanupOldLogs().catch(()=>{});
+  setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000);
+} catch {}
 
 // Global error handler
 app.use((err, req, res, next) => {

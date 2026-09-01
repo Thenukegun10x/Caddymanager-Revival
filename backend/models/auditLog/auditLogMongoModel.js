@@ -46,11 +46,11 @@ const auditLogSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Create a TTL index that will automatically delete documents after the configured time period
-// The actual expiration time will be set during model initialization from environment variables
-
-// Create a capped collection option (will be configured in the service)
-// This ensures the collection doesn't grow beyond a certain size
+// TTL index for retention (Set D)
+const retentionDays = parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '90', 10);
+if (retentionDays > 0) {
+  auditLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: retentionDays * 24 * 60 * 60 });
+}
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 

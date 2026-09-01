@@ -17,6 +17,7 @@
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "deep-equal": "^2.2.3",
     "dotenv": "^16.3.1",
