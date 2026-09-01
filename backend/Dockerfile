@@ -32,6 +32,8 @@ RUN npm prune --omit=dev && npm cache clean --force
 # Runtime — no build tools, non-root
 FROM node:20-bookworm-slim
 
+# better-sqlite3 runtime needs libsqlite3 (bundled build still links glibc + libstdc++)
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/src/node-app && chown -R node:node /usr/src/node-app
 RUN mkdir -p /app/data && chown -R node:node /app/data
 
