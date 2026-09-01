@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpecs = require('./config/swagger');
@@ -45,6 +47,35 @@ const corsOptions = {
   allowedHeaders: ['Content-Type','Authorization','X-API-Key']
 };
 app.use(cors(corsOptions));
+app.use(helmet({ contentSecurityPolicy: false, hsts: { maxAge: 31536000, includeSubDomains: true } }));
+// Rate limiting — generous in test, strict in prod (AGENTS.md §7 H7)
+const isTest = process.env.NODE_ENV === 'test';
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many login attempts, try later' },
+  skip: () => isTest
+});
+const testConnLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many test-connection attempts' },
+  skip: () => isTest
+});
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => isTest
+});
+app.use('/api/v1/auth/login', loginLimiter);
+app.use('/api/v1/caddy/test-connection', testConnLimiter);
+app.use('/api/v1/', apiLimiter);
 app.use(express.json({ limit: '200kb' }));
 app.use(express.text({ limit: '512kb', type: 'text/plain' }));
 app.use(express.urlencoded({ extended: true, limit: '200kb' }));
