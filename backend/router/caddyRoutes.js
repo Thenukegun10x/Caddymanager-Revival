@@ -1,6 +1,7 @@
 const express = require('express');
 const caddyController = require('../controllers/caddyController');
 const { protect } = require('../middleware/authMiddleware');
+const { validate, serverCreateSchema, serverUpdateSchema, testConnectionSchema, configCreateSchema } = require('../utils/validate');
 // All routes in this file are prefixed with /api/v1/caddy in the main app router
 const router = express.Router();
 
@@ -178,7 +179,7 @@ router.use(protect);
  */
 router.route('/servers')
   .get(caddyController.getAllServers)
-  .post(caddyController.addServer);
+  .post(validate(serverCreateSchema), caddyController.addServer);
 
 /**
  * @swagger
@@ -248,7 +249,7 @@ router.get('/servers/status', caddyController.checkAllServersStatus);
  */
 router.route('/servers/:id')
   .get(caddyController.getServerById)
-  .put(caddyController.updateServer)
+  .put(validate(serverUpdateSchema), caddyController.updateServer)
   .delete(caddyController.deleteServer);
 
 /**
@@ -278,7 +279,7 @@ router.route('/servers/:id')
  *       400:
  *         description: Connection failed
  */
-router.post('/test-connection', caddyController.testConnection);
+router.post('/test-connection', validate(testConnectionSchema), caddyController.testConnection);
 
 /**
  * @swagger
@@ -456,7 +457,7 @@ router.get('/servers/:id/generate/start-command', caddyController.generateStartC
  */
 router.route('/servers/:id/configs')
   .get(caddyController.getConfigsForServer)
-  .post(caddyController.createConfig);
+  .post(validate(configCreateSchema), caddyController.createConfig);
 
 /**
  * @swagger
@@ -554,7 +555,7 @@ router.get('/configs/:configId', caddyController.getConfigById);
  */
 router.route('/configs')
   .get(caddyController.getAllConfigs)
-  .post(caddyController.addConfig);
+  .post(validate(configCreateSchema), caddyController.addConfig);
 
 /**
  * @swagger

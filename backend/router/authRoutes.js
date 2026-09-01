@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { validate, loginSchema } = require('../utils/validate');
 
 /**
  * @swagger
@@ -68,7 +69,7 @@ const { protect, authorize } = require('../middleware/authMiddleware');
  *       500:
  *         description: Server error
  */
-router.post('/login', authController.login);
+router.post('/login', validate(loginSchema), authController.login);
 
 // Protected routes - require authentication
 router.use(protect);
