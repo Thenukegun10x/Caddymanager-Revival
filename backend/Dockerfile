@@ -20,14 +20,13 @@ ENV GIT_BRANCH=$GIT_BRANCH
 ENV BUILD_DATE=$BUILD_DATE
 
 COPY package*.json ./
-# Force native build against bookworm glibc
-ENV npm_config_build_from_source=true
-RUN npm ci --build-from-source --unsafe-perm
+RUN npm ci --unsafe-perm
 
 COPY . .
 RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || echo "no build-info"
-# Prune devDeps for runtime (-60 MB), keep only prod (better-sqlite3 stays)
-RUN npm prune --omit=dev && npm cache clean --force
+# Keep all deps for now to avoid pruning native prebuilds; verify better-sqlite3 prebuild present
+RUN ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; ls -lh node_modules/better-sqlite3/build/Release/ 2>&1 | head -n 20; node -e "console.log('prebuild:',require('./node_modules/better-sqlite3/lib/binding').getPrebuildPath()); const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('smoke:',db.prepare('select 1 as v').get())" || echo "smoke failed"
+RUN npm cache clean --force
 
 # Runtime — no build tools, non-root
 FROM node:20-bookworm-slim
@@ -55,6 +54,9 @@ COPY --chown=node:node . .
 # Overwrite with builder's fresh build-info (with build args)
 COPY --from=builder /usr/src/node-app/build-info.json ./build-info.json
 COPY --from=builder /usr/src/node-app/build-info.js ./build-info.js
+
+# Verify native addon present in runtime
+RUN ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; node -e "console.log('runtime prebuild:',require('./node_modules/better-sqlite3/lib/binding').getPrebuildPath()); const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('runtime smoke:',db.prepare('select 1 as v').get())" || echo "runtime smoke failed"
 
 # Ensure entrypoint and ownership
 RUN chown -R node:node /usr/src/node-app && chmod +x /usr/src/node-app/docker-entrypoint.sh || true
