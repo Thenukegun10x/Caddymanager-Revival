@@ -70,11 +70,10 @@ const { validate, loginSchema } = require('../utils/validate');
  *         description: Server error
  */
 router.post('/login', validate(loginSchema), authController.login);
+router.post('/logout', authController.logout);
 
 // Protected routes - require authentication
 router.use(protect);
-
-router.post('/logout', authController.logout);
 
 /**
  * @swagger

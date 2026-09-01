@@ -40,6 +40,11 @@ function getApiClient() {
     (response) => response,
     (error) => {
       if (error.response) {
+        // Don't loop on logout/login themselves
+        const url = error.config && error.config.url ? error.config.url : '';
+        if (url.includes('/auth/logout') || url.includes('/auth/login')) {
+          return Promise.reject(error);
+        }
         switch (error.response.status) {
           case 401:
             // Unauthorized: clear auth via authService and redirect to login
