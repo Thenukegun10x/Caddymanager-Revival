@@ -99,6 +99,27 @@ const createTablesIfNeeded = () => {
 		createdAt TEXT NOT NULL,
 		updatedAt TEXT NOT NULL
 	)`).run();
+
+	// Auto-migrate: backfill caddy_servers.createdBy NULL -> admin (idempotent)
+	try {
+		const nullCount = db.prepare(`SELECT COUNT(*) as c FROM caddy_servers WHERE createdBy IS NULL`).get().c;
+		if (nullCount > 0) {
+			let admin = null;
+			try { admin = db.prepare(`SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1`).get(); } catch (_) {}
+			if (!admin) { try { admin = db.prepare(`SELECT id FROM users ORDER BY id LIMIT 1`).get(); } catch (_) {} }
+			if (admin) {
+				const info = db.prepare(`UPDATE caddy_servers SET createdBy=? WHERE createdBy IS NULL`).run(admin.id);
+				if (info.changes > 0) console.log(`[migrate] auto-backfilled ${info.changes} caddy_servers.createdBy -> user ${admin.id}`);
+			}
+		}
+		if (process.env.NODE_ENV !== 'test') {
+			const chk = db.prepare(`PRAGMA integrity_check`).get();
+			if (chk.integrity_check !== 'ok') console.error(`[migrate] integrity_check failed: ${chk.integrity_check}`);
+		}
+	} catch (e) {
+		// Non-fatal — don't block boot on migration error (e.g., fresh DB races)
+		console.warn(`[migrate] auto-backfill skipped: ${e.message}`);
+	}
 };
 
 /**

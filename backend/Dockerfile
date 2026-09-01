@@ -48,6 +48,11 @@ RUN node scripts/generateBuildInfo.js && \
     echo "Verifying build info files exist:" && \
     ls -la src/build-info.* || echo "No build-info files found"
 
+# Entrypoint auto-migrates DB on boot (no user intervention)
+COPY --chown=node:node docker-entrypoint.sh /usr/src/node-app/docker-entrypoint.sh
+RUN chmod +x /usr/src/node-app/docker-entrypoint.sh
+
 EXPOSE 3000
 
+ENTRYPOINT ["/usr/src/node-app/docker-entrypoint.sh"]
 CMD ["npm", "start"]
