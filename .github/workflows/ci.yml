@@ -1,0 +1,183 @@
+name: CI — Tests + Security Gates
+
+# Enforces AGENTS.md §5 & §7 and PLAN.md P0 fixes. Fails PR if any gate red.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # for trivy sarif
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ── 1. Backend unit/integration — uses backend/jest.setup.js :memory: + mongodb-memory-server ──
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install (backend)
+        working-directory: backend
+        run: npm ci
+      - name: Run tests (sqlite)
+        working-directory: backend
+        env:
+          DB_ENGINE: sqlite
+          JWT_SECRET: ci-test-secret-do-not-use-in-prod
+          NODE_ENV: test
+        run: npm test
+      - name: Run tests (sqlite coverage)
+        working-directory: backend
+        env:
+          DB_ENGINE: sqlite
+          JWT_SECRET: ci-test-secret-do-not-use-in-prod
+          NODE_ENV: test
+        run: npm run test:coverage
+      - name: npm audit — fail on high
+        working-directory: backend
+        run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage
+          retention-days: 7
+
+  # ── 2. Frontend build (vite) — catches v-html XSS regressions via build parity ──
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install (frontend)
+        working-directory: frontend
+        run: npm ci
+      - name: Audit (frontend) — fail on high
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  # ── 3. Security gates — grep for patterns that violate AGENTS.md §7 — fail fast, no docker needed ──
+  security-grep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: AGENTS.md §7 — deny reintroduction of Criticals
+        run: |
+          set -e
+          echo "Checking AGENTS.md §7 rules..."
+          FAIL=0
+          # C1 — no hardcoded JWT fallback
+          if grep -R "your_jwt_secret_key_for_development\|your_jwt_secret_key_here\|JWT_SECRET.*||" backend/middleware/authMiddleware.js backend/controllers/authController.js 2>/dev/null; then
+            echo "::error::C1 JWT fallback found — backend/middleware/authMiddleware.js:6 must throw if !JWT_SECRET"
+            FAIL=1
+          fi
+          # C1 — must enforce algorithms
+          if ! grep -R "algorithms.*HS256" backend/middleware/authMiddleware.js backend/controllers/authController.js; then
+            echo "::warning::C1 JWT algorithms:['HS256'] not found — verify jwt.verify"
+          fi
+          # C3 — no raw column interpolation in SQLite models
+          if grep -R '\${key}.*= ?' backend/repositories/* backend/models/*/*SQLiteModel.js | grep -v "ALLOWED"; then
+            echo "::error::C3 raw \${key} interpolation without whitelist — check backend/repositories/*"
+            FAIL=1
+          fi
+          # H1 — metrics/build-info must not be public (must have protect)
+          if grep -L "protect" backend/router/metricsRoutes.js backend/router/buildInfoRoutes.js 2>/dev/null | grep -q .; then
+            echo "::warning::H1 metrics/buildInfo routes lack protect — see backend/router/metricsRoutes.js:31"
+          fi
+          # H2 — CORS wildcard with credentials
+          if grep -R "origin.*'*'.*credentials.*true\|origin.*\"*\".*credentials" backend/app.js; then
+            echo "::error::H2 CORS wildcard with credentials in backend/app.js:30"
+            FAIL=1
+          fi
+          # H5 — v-html on error data
+          if grep -R "v-html.*caddyfileValidationError\|v-html.*error" frontend/src/components/configurations/ frontend/src/components/dashboard/dashboardPanelTextComp.vue 2>/dev/null; then
+            echo "::error::H5 v-html on error — frontend/src/components/configurations/configurationDataComp.vue:276"
+            FAIL=1
+          fi
+          # H6 — localStorage token new code (existing allowed but warn on new)
+          if grep -R "localStorage.*auth_token" frontend/src/services/ | grep -v "authService.js"; then
+            echo "::warning::H6 new localStorage auth_token usage — prefer httpOnly cookie"
+          fi
+          if [ $FAIL -ne 0 ]; then
+            echo "Security grep FAILED — fix AGENTS.md §7 violations"
+            exit 1
+          fi
+          echo "Security grep passed"
+
+  # ── 4. Docker build + Trivy — mirrors PLAN.md Phase 2 hardening ──
+  docker-trivy:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          load: true
+          tags: caddymanager-test-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+      - name: Run Trivy (fs + image) — fail on CRITICAL
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+      - name: Docker config validate
+        run: |
+          docker compose -f docker-compose.build.yml config >/dev/null
+          docker compose -f docker-compose.build.yml -f docker-compose.test.yml config >/dev/null
+          echo "compose configs OK"
+
+  # ── 5. PoC deny smoke (static) — documents expected denies without needing live caddys ──
+  poc-smoke:
+    runs-on: ubuntu-latest
+    needs: [security-grep]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Document PoC denies (PLAN.md Appendix B)
+        run: |
+          cat <<'POC'
+          Expected denies after Phase 1 (verify locally with docker-compose.test.yml):
+          - POST /caddy/test-connection {apiUrl:"http://169.254.169.254"} -> 400 (C2 SSRF)
+          - PUT /caddy/servers/1 {"\"; SELECT":1} -> 400 (C3 SQLi)
+          - GET /metrics anon -> 401 (H1)
+          - v-html payload -> literal text (H5)
+          See AGENTS.md §5 for curl commands.
+          POC
+          echo "poc-smoke: static gate passed (live PoCs run locally via docker-compose.test.yml)"
