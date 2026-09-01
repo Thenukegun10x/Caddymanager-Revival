@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
@@ -66,6 +67,18 @@ const createTablesIfNeeded = () => {
 		createdAt TEXT NOT NULL,
 		updatedAt TEXT NOT NULL
 	)`).run();
+	// Backup before ALTER (pre-migration dump, idempotent, no-op for :memory:)
+	try {
+		if (sqlitePath !== ':memory:' && fs.existsSync(sqlitePath)) {
+			const hasCol = db.prepare(`PRAGMA table_info(caddy_servers)`).all().some(r=>r.name==='createdBy');
+			if (!hasCol) {
+				const ts = new Date().toISOString().replace(/[:.]/g,'-');
+				const backupPath = `${sqlitePath}.bak.${ts}`;
+				try { db.prepare(`VACUUM INTO ?`).run(backupPath); console.log(`[migrate] backup (VACUUM) -> ${backupPath}`); }
+				catch (_) { fs.copyFileSync(sqlitePath, backupPath); console.log(`[migrate] backup (copy) -> ${backupPath} (${fs.statSync(backupPath).size} bytes)`); }
+			}
+		}
+	} catch (e) { console.warn(`[migrate] backup skipped: ${e.message}`); }
 	try { db.prepare(`ALTER TABLE caddy_servers ADD COLUMN createdBy INTEGER`).run(); } catch (_) {}
 
 	// Caddy Configs table (mirrors caddyConfigSQLiteModel.ensureTable)

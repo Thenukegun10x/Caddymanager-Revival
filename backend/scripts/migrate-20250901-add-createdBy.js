@@ -6,6 +6,7 @@
  * Env: SQLITE_DB_PATH (defaults to ../../caddymanager.sqlite), DB_ENGINE=sqlite
  */
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
@@ -38,12 +39,20 @@ try {
   const before = db.prepare(`SELECT COUNT(*) as c FROM caddy_servers`).get().c;
   console.log(`[migrate] rows before: ${before}`);
 
-  if (!hasColumn('caddy_servers', 'createdBy')) {
+  const needsMigrate = !hasColumn('caddy_servers', 'createdBy');
+  if (needsMigrate) {
+    // Backup before ALTER (quick dump)
+    if (sqlitePath !== ':memory:' && fs.existsSync(sqlitePath)) {
+      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      const backupPath = `${sqlitePath}.bak.${ts}`;
+      try { db.prepare(`VACUUM INTO ?`).run(backupPath); console.log(`[migrate] backup (VACUUM) -> ${backupPath}`); }
+      catch (_) { fs.copyFileSync(sqlitePath, backupPath); console.log(`[migrate] backup (copy) -> ${backupPath} (${fs.statSync(backupPath).size} bytes)`); }
+    }
     console.log('[migrate] adding column caddy_servers.createdBy INTEGER');
     db.prepare(`ALTER TABLE caddy_servers ADD COLUMN createdBy INTEGER`).run();
     console.log('[migrate] column added');
   } else {
-    console.log('[migrate] column already exists — skip ADD');
+    console.log('[migrate] column already exists — skip ADD (no backup needed)');
   }
 
   // Verify no corruption: pragma integrity_check
