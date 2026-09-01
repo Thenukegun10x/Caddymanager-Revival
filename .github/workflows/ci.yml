@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   # ── 1. Backend unit/integration — uses backend/jest.setup.js :memory: + mongodb-memory-server ──
@@ -39,7 +39,7 @@ jobs:
           DB_ENGINE: sqlite
           JWT_SECRET: ci-test-secret-do-not-use-in-prod
           NODE_ENV: test
-        run: npm test -- --runInBand
+        run: npm test -- --runInBand --logHeapUsage
       - name: Run tests (sqlite coverage)
         working-directory: backend
         env:
