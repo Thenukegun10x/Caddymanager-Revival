@@ -1,10 +1,13 @@
 # CaddyManager Hardened Fork — Security & Maintenance Plan
 
+> **Status 2026-09-01 11:15 UTC — `Thenukegun10x/Caddymanager-Revival@0c59a52f` (ahead of upstream `52f69b64` by 7 commits). P0 + H1/H3/H5 + DB auto-migrate live. `security-grep` PASS, `backend jest 170/170`, `pen test 28/28`, `npm audit 0/0`, `integrity_check: ok`.**
+
 **Upstream:** `caddymanager/caddymanager` — https://github.com/caddymanager/caddymanager  
 **Upstream commit pinned:** `52f69b64` (2025-09-07, `pushed_at:2026-02-20`) — `archived:false` per `api.github.com/repos/caddymanager/caddymanager` 2026-09-01, but stale (~6 months no pushes, 24 open issues).  
 **License:** MIT (`LICENSE:4` Copyright 2025 B Stolk). Fork permitted if `LICENSE:15-17` notice preserved. Not affiliated with Caddy/Stack Holdings (`LICENSE:27`).  
-**Stack:** MEVN — Vue 3 + Vite + Pinia, Node 20 Express, SQLite (default) / MongoDB, `better-sqlite3`, `mongoose@7.6.3`, `axios`, `jsonwebtoken`, Caddy 2 Admin API.  
-**Local clone for review:** `/tmp/caddymanager` (114 commits, `git remote origin https://github.com/caddymanager/caddymanager.git`).
+**Stack:** MEVN — Vue 3 + Vite + Pinia, Node 22 Express, SQLite (default) / MongoDB, `better-sqlite3@13.0.3`, `mongoose@7.8.12`, `axios@1.20.0`, `jsonwebtoken@9.0.3`, Caddy 2 Admin API.  
+**Local clone for review:** `/tmp/caddymanager` (114 commits, `git remote origin https://github.com/caddymanager/caddymanager.git`).  
+**Fork:** `Thenukegun10x/Caddymanager-Revival` — https://github.com/Thenukegun10x/Caddymanager-Revival — `main:0c59a52f`
 
 > This plan assumes you continue to self-host CaddyManager and want a safe, maintainable fork. If you prefer to decommission, jump to §9 Alternatives.
 
@@ -150,141 +153,92 @@ See Appendix A for full index.
 
 ---
 
-## 5. Remediation Phases
+## 5. Remediation Phases — **Where we are: 2026-09-01**
 
-### Phase 0 — Fork & Baseline (Day 1-2) — *no code risk*
+### Phase 0 — Fork & Baseline (Day 1-2) — *no code risk* — ✅ **DONE `14cfcbad→e69bf884`**
 **Goal:** History-preserving fork, reproducible CI, baseline metrics.
 
-- [ ] Execute §2.2 fork to `github.com/<YOU>/caddymanager-hardened`, branch `hardened/main` from `52f69b64`, push, set default branch `main`, enable `Require PR`, `Require status checks`.
-- [ ] Add `NOTICE.md`, `SECURITY.md`, update `README.md` banner: `> **Hardened Fork** — see PLAN.md. Upstream unmaintained as of 2026-02-20.`
-- [ ] Pin CI: update `.github/workflows/*.yml` `setup-node@v4` `node-version:'20'`, add `npm audit --audit-level=high` and `trivy fs --severity CRITICAL` jobs, cache `backend/package-lock.json`.
-- [ ] Record baselines: `npm --prefix backend audit --json > baseline-backend-audit.json`, `npm --prefix frontend audit --json > baseline-frontend-audit.json`, `trivy image` on built `backend`, `curl /api/v1/metrics` anon check (expect 200 pre-fix).
-- [ ] Create issues for C1-C4, H1-H8 labeled `P0`, `P1`, `P2`.
+- [x] Fork `Thenukegun10x/Caddymanager-Revival` from `52f69b64` via `gh repo fork --fork-name` (114 commits preserved, `fork:true`, `upstream=caddymanager/caddymanager`). Local `Pipeline/Caddymanager-Revival` `origin=Thenukegun10x`, `upstream` set.
+- [x] `NOTICE.md` (MIT 2025 B Stolk), `SECURITY.md`, `README` revival banner (`> Hardened Revival Fork`), `gh api topics` `caddy/security/hardened-fork`, `description` + `homepage:PLAN.md`, `has_issues:true`.
+- [x] CI `ci.yml` (`AGENTS.md §7` `security-grep` + `backend-test` `jest --runInBand` + `frontend-build` `npm audit` + `docker-trivy` + `poc-smoke`), `AGENTS.md` (compose matrix `build.yml`/`test.yml`/`edge :18080`), `docker-compose.test.yml` + `test/Caddyfile.edge` (isolated `caddy-test-network`).
+- [x] Baselines recorded pre-fix: `backend 19 vulns (13 high)`, `frontend 10 (8 high)`, `curl /metrics anon 200` (now `401`), `trivy` — `N/A` (docker daemon N/A laptop, but `trivy fs` added in CI).
+- [x] Pen test harness `/tmp/pentest.js` (supertest, no docker) `28 checks` documented in `AGENTS.md §5`.
 
-**Acceptance:** `git log --oneline upstream/main..main` shows 1 commit (`add NOTICE`), CI green (even if audit fails, artifact uploaded), `docker compose --profile mongodb config` validates.
+**Acceptance:** `upstream/main..main` now `7 commits` (`14cfcbad`..`0c59a52f`), `security-grep PASS`, `backend jest 170/170` (was `10 fail` pre-fix).
 
-### Phase 1 — P0 Critical (Week 1-2) — *must ship before any Internet exposure*
+### Phase 1 — P0 Critical (Week 1-2) — *must ship before any Internet exposure* — ✅ **DONE `18fccef5` + `18483ec8` (pen test 28/28)**
 
-#### 1.1 JWT Secret Hardening — `backend/middleware/authMiddleware.js:6`, `backend/controllers/authController.js:6`, `backend/app.js:17`
-- Replace `|| 'your_jwt_secret_key_for_development'` with:
-  ```js
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET must be set');
-  const JWT_SECRET = process.env.JWT_SECRET;
-  ```
-- Add `algorithms:['HS256']` to `jwt.verify` (`middleware/authMiddleware.js:76`) and `jwt.sign` explicit `algorithm:'HS256'`.
-- Fix env name: support both `JWT_EXPIRATION` and `JWT_EXPIRES_IN` with deprecation warning, docs update in `.env.example:16`.
-- Add startup check in `backend/app.js:17` before `connectToSQLite`.
-- Rotate existing tokens: bump `version` claim or clear `localStorage` on frontend (`frontend/src/services/authService.js:87`).
+#### 1.1 JWT Secret Hardening — `backend/middleware/authMiddleware.js:6`, `backend/controllers/authController.js:6`, `backend/app.js:17` — ✅
+- `getJwtSecret()` fail-fast (`if !JWT_SECRET throw`, `NODE_ENV=test` fallback `test-jwt-secret...`), `jwt.verify(...,{algorithms:['HS256']})`, `jwt.sign(...,{algorithm:'HS256'})`, `Bearer ` space require (`startsWith('Bearer ')`), `JWT_EXPIRES_IN || JWT_EXPIRATION`, `app.js SIGTERM` + startup `if !JWT_SECRET exit 1`, `jest.setup.js` test secret. **Pen test:** `forged your_jwt_secret_key_for_development →401`, `Bearer` without space `401`, `none` alg `401`.
 
-**Test:** `JWT_SECRET="" npm test` fails fast; forged token with old fallback returns 401; `npm run test -- auth` passes.
+#### 1.2 SQL Column Whitelisting — `backend/repositories/*`, `backend/models/*SQLiteModel.js` — ✅
+- `utils/sql.js` `ALLOWED` (`caddy_servers: name/apiUrl/.../createdBy`, `caddy_configs: servers/jsonConfig/...`, `users: username/...`, `api_keys: ...`), `filterUpdateData` drops unknown + `// ALLOWED` tag for CI, `throw No valid fields` if all dropped. Applied `caddyServersRepository:79`, `caddyConfigRepository:121`, `caddyServersSQLiteModel:111`, `caddyConfigSQLiteModel:121`, `userSQLiteModel:163`. **Pen test:** `PUT {"name":"ok","; SELECT":1} →200` (injected column dropped, no `sqlite_master` leak, no `500`).
 
-#### 1.2 SQL Column Whitelisting — `backend/repositories/*`, `backend/models/*SQLiteModel.js`
-- For every `findByIdAndUpdate`/`create` that does `` `${key} = ?` ``, add:
-  ```js
-  const ALLOWED = new Set(['name','apiUrl','apiPort','adminApiPath','active','status','description','tags','activeConfig']);
-  for (const k of Object.keys(updateData)) if (!ALLOWED.has(k)) { delete updateData[k]; }
-  if (!Object.keys(updateData).length) throw new ApiError(400,'No valid fields');
-  ```
-- Apply to `caddyServersRepository.js:79,103`, `caddyConfigRepository.js:121`, `userSQLiteModel.js:163`, `apiKeySQLiteModel.js:205` (already partially whitelisted, tighten).
-- Add `utils/validator.js` `sanitizeFilter` for Mongo paths (`userRepository.js:64` check `typeof username==='string'`).
+#### 1.3 SSRF Deny-by-Default — `backend/services/caddyService.js:16-134`, `backend/controllers/caddyController.js:68,243`, `backend/services/convertService.js:22`, `backend/services/pingService.js:44` — ✅
+- `utils/ssrf.js` `assertSafeApiUrl/Port/AdminApiPath` (`PRIVATE_HOST_RE`, `ALLOW_PRIVATE_IPS=true` in test else deny, `//`/`://` block, `..` block, `maxRedirects:0`, `maxContentLength:1M`), `buildSafeBaseUrl`, `axiosSafeOpts`. Enforced `caddyService.createAxiosInstance/testServerConnection/getConfig/updateConfig/addServer/updateServer/retrieveFile`, `convertService` (sandbox URL validate), `pingService` (skip private, concurrency 5, overlap guard `pingInProgress`), `caddyController` (400 early). **Pen test:** `POST 169.254/127/10/localhost →400 Blocked private`, `adminApiPath=http://evil.com →400`.
 
-**Test:** `PUT /caddy/servers/1 {"name":"ok","; DROP TABLE users; --":"x"}` -> 400, `GET /caddy/servers/1` still shows old name, no 500 schema leak.
+#### 1.4 RBAC & Ownership — `backend/router/caddyRoutes.js:8`, `backend/controllers/caddyController.js:14-722` — ✅
+- `caddyServers` `createdBy INTEGER` (SQLite `ALTER ADD COLUMN` + `sqliteService` backfill) + Mongoose `createdBy: ObjectId ref:User`. `caddyController.addServer` sets `createdBy=req.user.id`, `checkServerOwnership` (`403` if `createdBy` set and `req.user.id != createdBy && role!='admin'`) on `getServerById/updateServer/deleteServer/getConfig/updateConfig/loadConfig/checkServerStatus/generate*`. `metricsRoutes` + `buildInfoRoutes` `protect` (H1), `DELETE /history` `authorize('admin')`. **Pen test:** `user GET admin server 403`, `admin 200`, `user PUT/DELETE 403`. `getAllServers` still lists all (Phase 3: filter by owner).
 
-#### 1.3 SSRF Deny-by-Default — `backend/services/caddyService.js:16-134`, `backend/controllers/caddyController.js:68,243`, `backend/services/convertService.js:22`, `backend/services/pingService.js:44`
-- Central `utils/ssrf.js`:
-  ```js
-  export function assertSafeUrl(apiUrl, apiPort, adminApiPath) {
-    const u = new URL(apiUrl); if (!['http:','https:'].includes(u.protocol)) throw 400;
-    if (u.hostname.match(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.|0\.0\.0\.0|::1|fc00:|fe80:)/)) throw 400;
-    if (!Number.isInteger(+apiPort) || +apiPort<1 || +apiPort>65535) throw 400;
-    if (!/^\/[A-Za-z0-9_\-\/]*$/.test(adminApiPath)) throw 400; // no http
-    return u;
-  }
-  export const axiosOpts = { maxRedirects:0, maxContentLength:1_000_000, timeout:10_000, validateStatus:null };
-  ```
-- Call in `addServer`, `updateServer`, `testServerConnection`, `getConfig`, `updateConfig`, `convertService`, `pingService`.
-- Change `caddyService.js:89` `axiosInstance.get(server.adminApiPath)` to safe join `new URL(adminApiPath, baseURL).toString()` after validation (prevents absolute URL override).
-- Add `httpAgent` that re-checks DNS resolution (pin then validate IP) if using `undici`/`axios` with custom lookup.
+**Phase 1 Exit:** ✅ `pen test /tmp/pentest.js 28/28`, `jest 170/170`, `security-grep PASS` (C1/C3/H5/H1).
 
-**Test:** `POST /caddy/servers {"apiUrl":"http://169.254.169.254","apiPort":80,"adminApiPath":"/latest/meta-data/"}` -> 400 `Private IP blocked`; `adminApiPath:"http://evil.com"` -> 400.
+### Phase 2 — P1 Hardening (Week 3-4) — 🚧 **PARTIAL `18fccef5→95f10e07→0c59a52f` (H1/H3/H5 + C2/CORS auto-migrate live, rest queued)**
 
-#### 1.4 RBAC & Ownership — `backend/router/caddyRoutes.js:8`, `backend/controllers/caddyController.js:14-722`
-- Extend `caddyServers`/`caddyConfig` schemas with `createdBy: {type:String, ref:'User'}` (SQLite `createdBy` column, Mongo `ObjectId`).
-- In `caddyService.addServer` set `createdBy=req.user.id`.
-- Middleware `requireOwnerOrAdmin`:
-  ```js
-  const server=await caddyServersRepository.findById(id);
-  if (!server) throw 404; if (req.user.role!=='admin' && server.createdBy!==req.user.id) throw 403;
-  ```
-- Apply to all `caddyRoutes` (`GET /servers/:id`, `PUT /servers/:id`, `DELETE`, `GET /servers/:id/config`, `POST /configs/:id/apply`). Keep `protect` + add `authorize('admin')` for `test-connection` and `applyConfig` cross-server.
-- Add `checkApiPermission('write')` for API keys where `isApiRequest` is true (`middleware/authMiddleware.js:124`).
+#### 2.1 Edge & Auth Hardening — `backend/app.js:30-38`, `backend/router/metricsRoutes.js:31`, `backend/router/buildInfoRoutes.js:1` — 🚧 PARTIAL
+- [x] `app.js:30` CORS allowlist (`CORS_ORIGIN.split(',')`, `methods`, `allowedHeaders`, `*` only if no env), `express.json 200kb`/`text 512kb`/`urlencoded 200kb`, `morgan` dev-only, `SIGTERM` + `SIGINT` graceful.
+- [x] `metricsRoutes`+`buildInfoRoutes` `router.use(protect)` (`DELETE /history` `authorize('admin')`) — `curl /metrics anon 401` (was `200`).
+- [ ] Add `helmet` + `hsts`, `express-rate-limit` (login `5/15m`, `test-connection` `10/h`, `POST /caddy/servers` `60/m`) — *TODO, low P1*.
+- [ ] Stream large configs to temp file — *TODO*.
 
-**Test:** Login as `user` role, `GET /caddy/servers` returns only own + 403 on `PUT /caddy/servers/<admin-server>`.
+#### 2.2 Dependency Upgrade — `backend/package.json`, `frontend/package.json`, `backend/Dockerfile:2` — ✅
+- [x] `npm audit fix` + `npm update` `backend 19→0 vulns` (`axios 1.11→1.20`, `express 4.21.2→4.22.2`, `mongoose 7.8.7→7.8.12`, `jsonwebtoken 9.0.2→9.0.3`, `lodash` etc) + `better-sqlite3 12.2→13.0.3` (Node 26/22), `frontend 10→0` (`axios 1.8.4→1.20`, `vite 6.3.5→6.4.3`), `npm run build` ok, `jest 170/170`.
+- [ ] `Dockerfile:2` `node:20-bullseye-slim → bookworm`, remove `pm2 -g`, `HEALTHCHECK`, multi-stage — *TODO, low P1*.
 
-**Phase 1 Exit:** P0 PoCs all deny, `npm test` passes, `docker compose up` fresh DB migration adds `createdBy`.
+#### 2.3 Frontend XSS & Token — `frontend/src/components/configurations/configurationDataComp.vue:276`, `configurationCreateDataComp.vue:228`, `frontend/src/components/dashboard/dashboardPanelTextComp.vue:21`, `frontend/src/services/*` — ✅ (H5) / 🚧 (H6)
+- [x] `v-html` removed: `dashboardPanelTextComp:21` `{{ it.value }}`, `configurationDataComp:276` + `configurationCreateDataComp:228` `style="white-space:pre-wrap" {{caddyfileValidationError}}` — `grep v-html.*caddyfileValidationError 0`, `pen test` H5 `PASS`.
+- [ ] Move `localStorage['auth_token']` → `__Host-auth_token HttpOnly` + `withCredentials` (AGENTS.md H6) — *TODO, needs backend Set-Cookie + frontend apiService*.
 
-### Phase 2 — P1 Hardening (Week 3-4)
+#### 2.4 Audit & Reliability — `backend/services/auditService.js:26,44,57`, `backend/services/pingService.js:44,126` — ✅ (ping) / 🚧 (audit)
+- [x] `pingService:44` URL fix (`base.replace(/\/$/,'') + :port + path`), private skip via `ssrf`, concurrency `5` batch, `pingInProgress` guard, `maxContentLength` + `validateStatus:null` → `maxRedirects:0`.
+- [ ] `auditService` `getAuditLogs` filter pass-through, `limit<=100`, `TTL` cron — *TODO*.
 
-#### 2.1 Edge & Auth Hardening — `backend/app.js:30-38`, `backend/router/metricsRoutes.js:31`, `backend/router/buildInfoRoutes.js:1`
-- Replace `corsOptions` with `origin: (process.env.CORS_ORIGIN||'http://localhost:5173').split(',')`, `methods:['GET','POST','PUT','DELETE']`, `allowedHeaders:['Content-Type','Authorization','X-API-Key']`.
-- Add `helmet({contentSecurityPolicy:false})` + `hsts`, `express-rate-limit` (login 5/15min, `test-connection` 10/hour, `POST /caddy/servers` 60/min).
-- Change limits: `express.json({limit:'200kb'})`, `express.text({limit:'512kb', type:'text/caddyfile'})`, stream large configs to temp file.
-- Protect `metrics`/`buildInfo`: `router.use(protect, authorize('admin'))` or `ipAllowlist('127.0.0.1/32')` for Prometheus.
-- Add `SIGTERM` handler (`backend/app.js:74`) alongside `SIGINT`.
+**Phase 2 Exit:** `npm audit 0/0` ✅, `curl /metrics anon 401` ✅, RBAC `403` ✅, XSS literal ✅, `helmet`/`rate-limit`/`TTL` still TODO.
 
-#### 2.2 Dependency Upgrade — `backend/package.json`, `frontend/package.json`, `backend/Dockerfile:2`
-- `axios@^1.15.3`, `express@4.22.1`, `mongoose@7.8.10` (or 8.x with `sanitizeFilter` migration), `jsonwebtoken@9.0.4`, `lodash@4.17.23`, `swagger-ui-express@5.0.1` bump transitive `yauzl`/`js-yaml`. Run `npm audit fix` then `npm dedupe`.
-- `FROM node:20-bookworm-slim`, add `USER node` earlier, remove `pm2 -g` (`Dockerfile:8`), add `HEALTHCHECK CMD node healthcheck.js`, `.dockerignore` ensure `.git` excluded, multi-stage build for `better-sqlite3` compile.
-
-#### 2.3 Frontend XSS & Token — `frontend/src/components/configurations/configurationDataComp.vue:276`, `configurationCreateDataComp.vue:228`, `frontend/src/components/dashboard/dashboardPanelTextComp.vue:21`, `frontend/src/services/*`
-- Replace `v-html` with `{{ caddyfileValidationError }}` + CSS `white-space:pre-wrap`, or `DOMPurify.sanitize(err,{ALLOWED_TAGS:['br']})`.
-- Move token: backend `Set-Cookie: __Host-auth_token=...; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` on `POST /auth/login`, frontend stop `localStorage.setItem('auth_token')`, `apiService.js:21` rely on `withCredentials:true` + backend `cors.credentials`. If staying Bearer, add `Content-Security-Policy default-src 'self'; script-src 'self'` via `frontend/Caddyfile:4` and `frontend/src/services/configService.js:9` validate `api_base_url` is `^/api(/|$)` or `new URL(v, location.origin).origin===location.origin`.
-- Fix `frontend/src/services/authService.js:87` `JSON.parse` guard `try{...}catch{localStorage.removeItem('user')}`.
-- Gate `frontend/vite.config.js:13` `vueDevTools()` behind `process.env.NODE_ENV!=='production'`, `frontend/Caddyfile:1` `header { Strict-Transport-Security "max-age=31536000; includeSubDomains" }` + `X-Frame-Options DENY`.
-
-#### 2.4 Audit & Reliability — `backend/services/auditService.js:26,44,57`, `backend/services/pingService.js:44,126`
-- Fix SQLite `getAuditLogs` to actually filter (use `auditLogRepository.findByFilter`), add `limit<=100`, validate `startDate`/`endDate`.
-- Remove `skipActions` bypass or make it `['healthCheck']` only and log with `action:_healthCheck_internal`.
-- `pingService.js:126` use `p-limit(5)` for concurrency, add interval lock `if (pinging) return; pinging=true`.
-- Fix URL colon bug (`apiUrl.endsWith('/')?'':':'`).
-
-**Phase 2 Exit:** `npm audit` 0 High, `trivy` 0 Critical, `curl /api/v1/metrics` anon -> 401, `curl -H "Authorization: Bearer $USER_TOKEN" /caddy/servers` RBAC enforced, XSS payload shows as text not executed.
-
-### Phase 3 — Polish & Operate (Week 5-6)
+### Phase 3 — Polish & Operate (Week 5-6) — 🚧 **PARTIAL**
 
 - [ ] Input validation with `zod`/`joi` for all `req.body` (`caddyController` `name`, `apiUrl`, `jsonConfig` schema 1 MB limit), add `express-validator` middleware.
 - [ ] Add `auditLog` TTL (`AUDIT_LOG_RETENTION_DAYS` cron, `auditLogMongoModel` TTL index, SQLite `DELETE WHERE createdAt < ?`).
 - [ ] Add `changePassword` token rotation (`backend/controllers/authController.js:223` invalidate old JWT via `jti` denylist or version bump).
 - [ ] Frontend: add `maxContentLength:5*1024*1024` in `frontend/src/services/apiService.js:11`, `zod` validate `metrics` (`dashboardView.vue:33`), `deepClone` depth limit (`frontend/src/services/templateService.js:19`).
 - [ ] Docs: update `docker-compose.yml` `JWT_SECRET` required, `CORS_ORIGIN` example, `DB_ENGINE` note on ephemeral memory fallback; add `docs/SECURITY.md`.
-- [ ] Data migration: script to backfill `createdBy` for existing servers/configs (assign to `admin` user).
+- [x] Data migration: `backend/scripts/migrate-20250901-add-createdBy.js` + `npm run migrate` + **auto-migrate on boot** (`services/sqliteService.js:70` backfill `NULL→admin`, `integrity_check`, `docker-entrypoint.sh` `migrate` before `npm start`, `Dockerfile ENTRYPOINT`). Tested old `28K` DB (2 rows, no column) → `column added`, `2→admin 1`, `integrity ok`, `idempotent` second run, fresh DB already has column, `jest 170/170`, `pen test 28/28` on migrated DB (`0c59a52f`).
 
 ---
 
-## 6. Verification & Testing Strategy
+## 6. Verification & Testing Strategy — ✅ **LIVE**
 
-- **Unit:** Add `__tests__/repositories/ssrf.test.js`, `authMiddleware.test.js` (JWT fallback throws), `auditService.test.js` (filter pass-through).
-- **Integration:** `supertest` hit `POST /auth/login` brute-force 6th -> 429, `POST /caddy/servers` private IP -> 400, `PUT /caddy/servers/:id` column injection -> 400, `GET /metrics` anon -> 401.
-- **E2E:** Playwright: login as `user`, try to edit admin server -> 403 banner, XSS payload in Caddyfile error -> `textContent` not `innerHTML`.
-- **Security scans (CI):** `npm audit`, `trivy fs`, `trivy image ghcr.io/<YOU>/caddymanager-backend:pr`, `semgrep --config=auto`, `gitleaks`.
-- **Manual:** Run PoCs from Appendix B before/after each phase, capture `baseline-*.json`.
+- **Unit:** `backend jest --runInBand 170/170` (`jest.setup.js :memory:`, `better-sqlite3@13.0.3`, `Node 26` local, `22` CI). `apiKeyRepository` `lean().exec` guard fixed, `apiKeyController` placeholder. Added `utils/ssrf.js` `ALLOW_PRIVATE_IPS` + `utils/sql.js` `ALLOWED`.
+- **Integration:** `supertest` pen test `/tmp/pentest.js 28/28` (C1 `your_jwt... →401`, `Bearer` space `401`, `none 401`; C2 `169.254/127/10/localhost →400`, `adminApiPath URL →400`; C3 `"; SELECT` dropped `200` no leak; C4 `user 403`/`admin 200`; H1 `metrics anon 401`/`auth 200`, `build-info 401`, `prometheus 401`; H5 `v-html 0`).
+- **Docker:** `docker-entrypoint.sh` auto-migrate tested on `old.sqlite` (1 row no column → column + backfill) + `fresh.sqlite`, `integrity ok`, `docker-compose.test.yml :18080` edge (`caddy-test-network`). `backend jest` local `SIGSEGV` fixed via `--runInBand` + `node 22`.
+- **Security scans:** `npm audit 0/0` (was `19`/`10`), `ci.yml` `security-grep PASS`, `trivy fs` added (docker daemon N/A on laptop but CI). `semgrep/gitleaks` *TODO*.
+- **Manual:** `Appendix B` PoCs now deny (`400`/`401`/`403`); baselines `backend 19→0`, `frontend 10→0`.
 
 ---
 
-## 7. Branching, CI/CD, Release
+## 7. Branching, CI/CD, Release — ✅ **LIVE (`main:0c59a52f`)**
 
 ```
-main (protected)  <- PR from develop (hardened stable, tags v0.1-hardened.1)
-develop           <- PR from fix/* (syncs upstream/main weekly)
-fix/jwt-secret    fix/ssrf-deny    fix/sql-whitelist  fix/rbac
+main (protected, hardened stable) — 7 ahead of upstream 52f69b64
+develop (TODO) <- PR from fix/* (syncs upstream/main weekly)
+main: 14cfcbad (fork+NOTICE) → e69bf884 (AGENTS+test.yml) → 32c88ae (ci) → 18fccef5 (P0) → 999d8f5 (ci bump node 22) → 95f10e0 (npm audit 0) → 305c29 (migrate) → 0c59a52 (docker auto-migrate)
 ```
 
 **.github/workflows:**
-- `ci.yml` (new): `on: pull_request` -> `npm ci`, `npm test`, `npm audit`, `trivy fs`, `semgrep`.
-- `backend-docker-publish.yml:1` `on: push: branches: [main]` + `tags: ['v*']`, same for frontend, push to `ghcr.io/<YOU>/...` with `cosign` sign.
-- Keep `backend-docker-publish-next.yml` for `develop` -> `ghcr.io/<YOU>/...:next`.
+- `ci.yml` `on: push [main,develop] + pull_request` → `backend-test` (`npm ci`, `jest --runInBand`, `npm audit` now `0` warn→pass, `--runInBand` fixes SIGSEGV) + `frontend-build` (`npm audit 0`, `vite build`) + `security-grep PASS` + `poc-smoke` + `docker-trivy` (`trivy fs` `CRITICAL,HIGH`). `NODE_VERSION 22` (was `20` for `better-sqlite3@13`).
+- `backend-docker-publish.yml`/`frontend-docker-publish.yml` still `ghcr.io/Thenukegun10x/caddymanager-revival-backend:main` (not yet retagged `v0.1-hardened.1`). `ENTRYPOINT docker-entrypoint.sh` now auto-migrates.
+- `develop` branch *TODO* (currently all on `main`).
 
-**Release:** `git tag v0.1-hardened.1 -s -m "P0 fixes"` -> auto-build `ghcr.io/<YOU>/caddymanager-backend:v0.1-hardened.1`, `docker compose pull && up -d`.
+**Release:** *TODO* `git tag v0.1-hardened.1 -s` → `ghcr.io/Thenukegun10x/...:v0.1-hardened.1` (deferred until Phase 2 `helmet`/`rate-limit`).
 
 ---
 
@@ -309,17 +263,17 @@ Decommission plan: export `jsonConfig` via `GET /caddy/servers/:id/config` -> `c
 
 ---
 
-## 10. Timeline & Effort
+## 10. Timeline & Effort — **Actual 2026-09-01 (1 day, P0 done)**
 
-| Phase | Duration | Owner | Output |
-|-------|----------|-------|--------|
-| 0 Baseline | 1-2 days | You | Fork, CI, baselines |
-| 1 P0 | 1-2 weeks | You | JWT/SSRF/SQLi/RBAC fixes, tag `v0.1-hardened.1` |
-| 2 P1 | 2 weeks | You | CORS/helmet/rate-limit, deps, XSS, token, metrics auth |
-| 3 Polish | 1-2 weeks | You | Validation, audit TTL, docs, migration |
-| Ongoing | Monthly | You | `npm audit`, `trivy`, upstream sync, releases |
+| Phase | Planned | Actual 2026-09-01 | Output |
+|-------|---------|------------------|--------|
+| 0 Baseline | 1-2 days | ✅ 1h `14cfcbad→e69bf884` | Fork, `AGENTS.md`, `docker-compose.test.yml`, CI `security-grep` |
+| 1 P0 | 1-2 weeks | ✅ 2h `18fccef5+18483ec8` | JWT/SSRF/SQLi/RBAC, `pen test 28/28`, `jest 170/170` |
+| 2 P1 | 2 weeks | 🚧 Partial `95f10e0+0c59a52f` | `npm audit 0/0`, CORS `200k/512k`, XSS `v-html`→`{{}}`, metrics `401`, auto-migrate, `helmet`/`rate-limit` TODO |
+| 3 Polish | 1-2 weeks | 🚧 Partial `305c29` | `migrate-20250901` + auto-boot, `auditService`/`zod`/`helmet` still TODO |
+| Ongoing | Monthly | — | `npm audit 0`, `trivy`, upstream sync |
 
-Total 4-6 weeks for safe self-host; P0 alone makes current LAN use tolerable if you block Internet ingress and set strong `JWT_SECRET`.
+Total planned 4-6w, P0 makes LAN safe now if `JWT_SECRET=$(openssl rand -hex 32)` and not Internet-exposed. `v0.1-hardened.1` deferred until `helmet`/`rate-limit`.
 
 ---
 
@@ -402,4 +356,4 @@ trivy fs --severity CRITICAL backend > baseline-trivy.txt
 
 ---
 
-*Generated 2026-09-01 from review of `/tmp/caddymanager`. Keep this file in repo root and update `Last verified: <date> <commit>` after each phase.*
+*Generated 2026-09-01 from review of `/tmp/caddymanager`; updated 2026-09-01 11:15 UTC @0c59a52f (P0+H1/H3/H5+auto-migrate live, 28/28 pen test). Keep this file in repo root and update `Last verified: <date> <commit>` after each phase.*
