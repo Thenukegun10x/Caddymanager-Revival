@@ -1,0 +1,4 @@
+:80 {
+  reverse_proxy frontend:80
+  header Strict-Transport-Security "max-age=31536000"
+}

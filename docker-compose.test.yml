@@ -1,0 +1,23 @@
+# Test stack — use with: docker compose -f docker-compose.build.yml -f docker-compose.test.yml up --build -d
+# Edge :18080 -> frontend:80 -> backend:3000, backend also on caddy-test-network to reach caddy-server-* targets
+services:
+  caddy-edge:
+    image: caddy:2.10-alpine
+    container_name: caddy-test-edge
+    ports: ["18080:80"]
+    volumes: ["./test/Caddyfile.edge:/etc/caddy/Caddyfile:ro"]
+    networks: [caddy-test-network, caddymanager]
+    depends_on: [frontend]
+
+  backend:
+    networks: [caddymanager, caddy-test-network]
+    environment:
+      # Fail fast if not set — prevents fallback to hardcoded secret (PLAN.md C1)
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env.test.local}"
+      CORS_ORIGIN: "http://localhost:18080"
+      CADDY_SANDBOX_URL: "http://caddy-sandbox:2020"
+
+  # ensure backend can resolve caddy-server-* via external network created by spin scripts
+networks:
+  caddy-test-network:
+    external: true
