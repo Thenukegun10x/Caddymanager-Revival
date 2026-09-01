@@ -24,8 +24,8 @@ RUN npm ci --unsafe-perm
 
 COPY . .
 RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || echo "no build-info"
-# Keep all deps for now to avoid pruning native prebuilds; verify better-sqlite3 prebuild present
-RUN ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; ls -lh node_modules/better-sqlite3/build/Release/ 2>&1 | head -n 20; node -e "console.log('prebuild:',require('./node_modules/better-sqlite3/lib/binding').getPrebuildPath()); const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('smoke:',db.prepare('select 1 as v').get())" || echo "smoke failed"
+# Verify better-sqlite3 loads (works for 12.x via bindings and 13.x via prebuilds)
+RUN ls -lh node_modules/better-sqlite3/build/Release/ 2>&1 | head -n 20; ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('smoke:',db.prepare('select 1 as v').get())" || echo "smoke failed"
 RUN npm cache clean --force
 
 # Runtime — no build tools, non-root
@@ -56,7 +56,7 @@ COPY --from=builder /usr/src/node-app/build-info.json ./build-info.json
 COPY --from=builder /usr/src/node-app/build-info.js ./build-info.js
 
 # Verify native addon present in runtime
-RUN ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; node -e "console.log('runtime prebuild:',require('./node_modules/better-sqlite3/lib/binding').getPrebuildPath()); const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('runtime smoke:',db.prepare('select 1 as v').get())" || echo "runtime smoke failed"
+RUN ls -lh node_modules/better-sqlite3/build/Release/ 2>&1 | head -n 20; node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('runtime smoke:',db.prepare('select 1 as v').get())" || echo "runtime smoke failed"
 
 # Ensure entrypoint and ownership
 RUN chown -R node:node /usr/src/node-app && chmod +x /usr/src/node-app/docker-entrypoint.sh || true
