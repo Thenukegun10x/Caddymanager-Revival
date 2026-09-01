@@ -1,3 +1,7 @@
+> **Hardened Revival Fork** — This is `Thenukegun10x/Caddymanager-Revival`, a security-hardened revival of [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (stale since 2026-02-20, `archived:false` but unmaintained). See [`PLAN.md`](./PLAN.md) for audit (Critical SSRF/JWT/SQLi/IDOR) and [`NOTICE.md`](./NOTICE.md) for attribution. Original MIT © 2025 B Stolk.
+>
+> **Status:** Phase 0 baseline forked at `52f69b64`. `main` is hardened stable; `develop` tracks upstream. Do not expose to Internet until `v0.1-hardened.1`. Set strong `JWT_SECRET`!
+
 # CaddyManager
 
 Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack with support for both SQLite and MongoDB databases.
