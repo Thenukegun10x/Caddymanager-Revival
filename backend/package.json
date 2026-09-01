@@ -10,7 +10,8 @@
     "prestart": "npm run generate-build-info",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "migrate": "node scripts/migrate-20250901-add-createdBy.js"
   },
   "dependencies": {
     "axios": "^1.6.2",
