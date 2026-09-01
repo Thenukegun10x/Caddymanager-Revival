@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 const dbConfig = require('../config/dbConfig');
+// Lazy require to avoid needing dev dep when DB_ENGINE=sqlite (pruned image)
+let MongoMemoryServer;
+try { ({ MongoMemoryServer } = require('mongodb-memory-server')); } catch (_) { MongoMemoryServer = null; }
 require('dotenv').config();
 
 let mongoServer = null; // Keep reference to memory server instance
@@ -12,6 +14,9 @@ const connectToMongo = async () => {
       await mongoose.connect(dbConfig.uri, dbConfig.options);
       console.log('Connected to MongoDB successfully (Production)');
     } else {
+      if (!MongoMemoryServer) {
+        throw new Error('mongodb-memory-server not installed (pruned) — set MONGODB_URI or use DB_ENGINE=sqlite');
+      }
       // Development: Use MongoDB Memory Server
       console.log('Starting MongoDB Memory Server for development...');
       mongoServer = await MongoMemoryServer.create(dbConfig.memoryServerOptions);

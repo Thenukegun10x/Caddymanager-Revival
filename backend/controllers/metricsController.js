@@ -72,12 +72,12 @@ const getConfigs = catchAsync(async (req, res) => {
  *     summary: Get compact metrics history used for sparklines
  *     tags:
  *       - Metrics
- *     parameters:
+  *     parameters:
  *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
- *         description: Limit the number of historical entries returned (default: all)
+ *         description: "Limit the number of historical entries returned (default: all)"
  *       - in: query
  *         name: fields
  *         schema:
