@@ -4,7 +4,7 @@
  */
 const { URL } = require('url');
 
-const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|::1|fc00:|fe80:|fd00:)/i;
+const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|::1|fc00:|fe80:|fd00:|::ffff:)/i;
 
 function assertSafePort(port) {
   const n = Number(port);
@@ -28,9 +28,12 @@ function assertSafeApiUrl(apiUrl) {
   // Hostname must be explicit, reject private ranges and metadata
   // In test, allow private by default so jest can use spin-caddy-servers.sh targets,
   // but respect explicit ALLOW_PRIVATE_IPS=false to enforce deny (for pen test)
-  const host = u.hostname;
+  // Strip IPv6 brackets for private check (http://[::1] -> ::1)
+  let host = u.hostname;
   if (!host) throw new Error('apiUrl missing hostname');
-  const isPrivate = PRIVATE_HOST_RE.test(host);
+  host = host.replace(/^\[(.*)\]$/, '$1');
+  // Also handle url.host includes brackets for IPv6 literal
+  const isPrivate = PRIVATE_HOST_RE.test(host) || PRIVATE_HOST_RE.test(host.replace(/^\[|\]$/g, ''));
   const allowPrivate = process.env.ALLOW_PRIVATE_IPS === 'true' || (process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false');
   if (isPrivate && !allowPrivate) {
     throw new Error(`Blocked private/internal apiUrl host ${host} (set ALLOW_PRIVATE_IPS=true to allow for local Caddy)`);

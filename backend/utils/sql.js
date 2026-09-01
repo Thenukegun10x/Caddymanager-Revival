@@ -4,7 +4,7 @@
  */
 
 const ALLOWED = {
-  caddy_servers: new Set(['name','apiUrl','apiPort','adminApiPath','active','tags','description','lastPinged','status','activeConfig','createdBy']),
+  caddy_servers: new Set(['name','apiUrl','apiPort','adminApiPath','active','tags','description','lastPinged','status','activeConfig']),
   caddy_configs: new Set(['servers','name','format','jsonConfig','status','metadata','history']),
   users: new Set(['username','email','password','role','isActive','tokenVersion','lastLogin']),
   api_keys: new Set(['name','permissions','isActive','lastUsed','expiresAt']),

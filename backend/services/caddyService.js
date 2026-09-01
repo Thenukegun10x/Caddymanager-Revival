@@ -60,6 +60,11 @@ class CaddyService {
    * @returns {Promise<Object>} - Updated server object
    */
   async updateServer(serverId, updateData) {
+    // Block ownership takeover defense in depth
+    if (updateData.createdBy !== undefined) {
+      console.warn(`Blocked attempt to change createdBy on ${serverId}`);
+      delete updateData.createdBy;
+    }
     // Validate any SSRF fields present in update
     if (updateData.apiUrl !== undefined || updateData.apiPort !== undefined || updateData.adminApiPath !== undefined) {
       const current = await caddyServersRepository.findById(serverId);

@@ -169,6 +169,10 @@ const caddyController = {
       if (!server) return;
       const serverId = req.params.id;
       const updateData = req.body;
+      // Block ownership takeover
+      if (updateData.createdBy !== undefined) {
+        return res.status(403).json({ success: false, message: 'Cannot change ownership' });
+      }
       // Whitelist SSRF fields validation — block private hosts early
       try {
         if (updateData.apiUrl !== undefined) assertSafeApiUrl(updateData.apiUrl);
