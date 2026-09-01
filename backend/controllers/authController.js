@@ -83,11 +83,12 @@ exports.login = async (req, res) => {
     // Generate token with current tokenVersion
     const token = generateToken(user.id || user._id, user.tokenVersion || 0);
 
-    // Set httpOnly cookie (for frontend withCredentials, mitigates XSS steal)
+    // Set httpOnly cookie (Secure only on https, else http LAN 192.168... would not send)
+    const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
     res.cookie('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: isSecure,
+      sameSite: isSecure ? 'strict' : 'lax',
       path: '/',
       maxAge: 24 * 60 * 60 * 1000
     });
@@ -128,10 +129,11 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
+  const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
   res.clearCookie('auth_token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isSecure,
+    sameSite: isSecure ? 'strict' : 'lax',
     path: '/'
   });
   res.json({ success: true, message: 'Logged out' });

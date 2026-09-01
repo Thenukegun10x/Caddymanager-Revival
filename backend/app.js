@@ -19,6 +19,7 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
 
 // Create Express app
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 
