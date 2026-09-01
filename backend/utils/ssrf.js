@@ -26,11 +26,12 @@ function assertSafeApiUrl(apiUrl) {
     throw new Error(`apiUrl must be http(s), got ${u.protocol}`);
   }
   // Hostname must be explicit, reject private ranges and metadata
-  // In test, allow localhost/private so jest can use spin-caddy-servers.sh targets
+  // In test, allow private by default so jest can use spin-caddy-servers.sh targets,
+  // but respect explicit ALLOW_PRIVATE_IPS=false to enforce deny (for pen test)
   const host = u.hostname;
   if (!host) throw new Error('apiUrl missing hostname');
   const isPrivate = PRIVATE_HOST_RE.test(host);
-  const allowPrivate = process.env.NODE_ENV === 'test' || process.env.ALLOW_PRIVATE_IPS === 'true';
+  const allowPrivate = process.env.ALLOW_PRIVATE_IPS === 'true' || (process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false');
   if (isPrivate && !allowPrivate) {
     throw new Error(`Blocked private/internal apiUrl host ${host} (set ALLOW_PRIVATE_IPS=true to allow for local Caddy)`);
   }

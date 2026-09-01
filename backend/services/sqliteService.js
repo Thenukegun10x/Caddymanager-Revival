@@ -20,7 +20,7 @@ const connectToSQLite = () => {
 	}
 };
 
-// Create tables if they do not exist
+// Create tables if they do not exist — ensure all app tables exist at boot
 const createTablesIfNeeded = () => {
 	// Users table
 	db.prepare(`CREATE TABLE IF NOT EXISTS users (
@@ -49,7 +49,56 @@ const createTablesIfNeeded = () => {
 		FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE
 	)`).run();
 
-	// Add more table creation statements here as needed
+	// Caddy Servers table (mirrors caddyServersSQLiteModel.ensureTable)
+	db.prepare(`CREATE TABLE IF NOT EXISTS caddy_servers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		apiUrl TEXT NOT NULL,
+		apiPort INTEGER DEFAULT 2019,
+		adminApiPath TEXT DEFAULT '/config/',
+		active INTEGER DEFAULT 1,
+		tags TEXT DEFAULT '[]',
+		description TEXT,
+		lastPinged TEXT,
+		status TEXT DEFAULT 'unknown',
+		activeConfig INTEGER,
+		createdBy INTEGER,
+		createdAt TEXT NOT NULL,
+		updatedAt TEXT NOT NULL
+	)`).run();
+	try { db.prepare(`ALTER TABLE caddy_servers ADD COLUMN createdBy INTEGER`).run(); } catch (_) {}
+
+	// Caddy Configs table (mirrors caddyConfigSQLiteModel.ensureTable)
+	db.prepare(`CREATE TABLE IF NOT EXISTS caddy_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		servers TEXT NOT NULL,
+		name TEXT NOT NULL,
+		format TEXT NOT NULL DEFAULT 'json',
+		jsonConfig TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'draft',
+		metadata TEXT,
+		history TEXT,
+		createdAt TEXT NOT NULL,
+		updatedAt TEXT NOT NULL
+	)`).run();
+	try { db.prepare(`ALTER TABLE caddy_configs ADD COLUMN history TEXT`).run(); } catch (_) {}
+
+	// Audit Logs table
+	db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		action TEXT NOT NULL,
+		userId INTEGER,
+		username TEXT NOT NULL,
+		resourceType TEXT NOT NULL,
+		resourceId TEXT,
+		details TEXT,
+		statusCode INTEGER,
+		ipAddress TEXT,
+		userAgent TEXT,
+		timestamp TEXT NOT NULL,
+		createdAt TEXT NOT NULL,
+		updatedAt TEXT NOT NULL
+	)`).run();
 };
 
 /**
