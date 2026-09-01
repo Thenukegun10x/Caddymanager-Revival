@@ -21,7 +21,8 @@ function getApiClient() {
 
   apiClient.interceptors.request.use(
     (reqConfig) => {
-      const token = localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
+      // Prefer in-memory token (Set F), fallback to legacy localStorage, else rely on httpOnly cookie (withCredentials)
+      const token = (typeof window !== 'undefined' && window.__auth_token) || localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
       if (token) {
         reqConfig.headers.Authorization = `Bearer ${token}`
       }

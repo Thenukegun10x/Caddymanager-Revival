@@ -48,22 +48,60 @@ const auditService = {
   },
 
   /**
-   * Get audit logs with filtering and pagination
+   * Get audit logs with filtering and pagination (Set F)
    */
   async getAuditLogs({ filter = {}, limit = 100, skip = 0, sort = { timestamp: -1 } } = {}) {
     try {
-      // Only basic filter, limit, skip, sort supported for now
-      // For SQLite, sort is always by timestamp desc
-      const logs = await auditLogRepository.findAll({ limit, offset: skip });
-      // For basic implementation, just return what we got
-      const total = logs.length;
+      limit = Math.min(Math.max(parseInt(limit) || 100, 1), 100);
+      skip = Math.max(parseInt(skip) || 0, 0);
+      // Normalize Mongo-style filter keys (user.username as regex) for SQLite
+      const norm = { ...filter };
+      if (filter['user.username']) {
+        const v = filter['user.username'];
+        norm.username = typeof v === 'object' && v.$regex ? v.$regex : v;
+        delete norm['user.username'];
+      }
+      if (filter['user.userId']) {
+        const v = filter['user.userId'];
+        norm.userId = typeof v === 'object' && v.$regex ? v.$regex : v;
+        delete norm['user.userId'];
+      }
+      filter = norm;
+      // Try repository with filter if available (Mongo)
+      if (typeof auditLogRepository.findWithFilter === 'function') {
+        return await auditLogRepository.findWithFilter(filter, { limit, skip, sort });
+      }
+      // Fallback: fetch and filter in-memory (SQLite)
+      const all = await auditLogRepository.findAll({ limit: 1000, offset: 0 });
+      let filtered = all.filter(log => {
+        const logUserId = log.user?.userId ?? log.userId;
+        const logUsername = log.user?.username ?? log.username;
+        if (filter.action && log.action !== filter.action) return false;
+        if (filter.resourceType && log.resourceType !== filter.resourceType) return false;
+        if (filter.resourceId && String(log.resourceId) !== String(filter.resourceId)) return false;
+        if (filter.userId && String(logUserId) !== String(filter.userId)) return false;
+        if (filter.username && !String(logUsername || '').toLowerCase().includes(String(filter.username).toLowerCase())) return false;
+        if (filter.startDate) {
+          const start = new Date(filter.startDate);
+          if (!isNaN(start) && new Date(log.timestamp) < start) return false;
+        }
+        if (filter.endDate) {
+          const end = new Date(filter.endDate);
+          if (!isNaN(end) && new Date(log.timestamp) > end) return false;
+        }
+        return true;
+      });
+      // Sort by timestamp desc by default
+      filtered.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      const total = filtered.length;
+      const logs = filtered.slice(skip, skip + limit);
       return {
         logs,
         pagination: {
           total,
           limit,
           skip,
-          hasMore: logs.length === limit // Rough estimate - there might be more if we got a full page
+          hasMore: skip + limit < total
         }
       };
     } catch (error) {

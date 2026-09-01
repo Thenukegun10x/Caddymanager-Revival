@@ -6,10 +6,10 @@ import apiService from './apiService';
 const API_URL = config.API.BASE_URL;
 const AUTH_ENDPOINT = `${API_URL}/auth`;
 
-// Get token from localStorage
+// Get token from localStorage (fallback, httpOnly cookie is primary — Set F)
 const getToken = () => localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY);
 
-// Set authorization header
+// Set authorization header — only if token exists (httpOnly path uses withCredentials cookie)
 const setAuthHeader = () => {
   const token = getToken();
   if (token) {
@@ -20,7 +20,7 @@ const setAuthHeader = () => {
 
 // Service methods
 export default {
-  // Login user
+  // Login user — httpOnly cookie set by backend, do NOT persist token in localStorage (XSS mitigation, Set F)
   login: async (credentials) => {
     try {
       const response = await apiService.post(`/auth/login`, {
@@ -28,9 +28,14 @@ export default {
         password: credentials.password
       });
       
-      if (response.data.token) {
-        localStorage.setItem(config.STORAGE.AUTH_TOKEN_KEY, response.data.token);
+      if (response.data.user) {
         localStorage.setItem(config.STORAGE.USER_KEY || 'user', JSON.stringify(response.data.user));
+        // Keep token only in memory for non-cookie clients (not persisted)
+        if (response.data.token) {
+          window.__auth_token = response.data.token;
+        }
+        // Remove any legacy token from localStorage if present
+        localStorage.removeItem(config.STORAGE.AUTH_TOKEN_KEY);
       }
       return response.data;
     } catch (error) {
@@ -38,10 +43,12 @@ export default {
     }
   },
 
-  // Logout user
-  logout: () => {
+  // Logout user — clear httpOnly cookie via backend + local state
+  logout: async () => {
+    try { await apiService.post(`/auth/logout`); } catch (_) {}
     localStorage.removeItem(config.STORAGE.AUTH_TOKEN_KEY);
     localStorage.removeItem(config.STORAGE.USER_KEY || 'user');
+    window.__auth_token = null;
   },
 
   // Get current user
@@ -77,15 +84,23 @@ export default {
     }
   },
 
-  // Check if user is logged in
+  // Check if user is logged in — via user object (httpOnly cookie is primary)
   isLoggedIn: () => {
-    return !!getToken();
+    try {
+      const user = localStorage.getItem(config.STORAGE.USER_KEY || 'user');
+      return !!user;
+    } catch { return false; }
   },
 
-  // Get current authenticated user from localStorage
+  // Get current authenticated user from localStorage (guard JSON parse)
   getUser: () => {
-    const user = localStorage.getItem(config.STORAGE.USER_KEY || 'user');
-    return user ? JSON.parse(user) : null;
+    try {
+      const user = localStorage.getItem(config.STORAGE.USER_KEY || 'user');
+      return user ? JSON.parse(user) : null;
+    } catch {
+      localStorage.removeItem(config.STORAGE.USER_KEY || 'user');
+      return null;
+    }
   },
 
   // Admin: Get all users
