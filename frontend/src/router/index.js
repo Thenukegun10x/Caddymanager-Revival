@@ -156,20 +156,36 @@ const router = createRouter({
   ],
 })
 
+function isSafeRedirect(path) {
+  if (typeof path !== 'string') return false;
+  if (!path.startsWith('/')) return false;
+  if (path.startsWith('//') || path.startsWith('/\\')) return false;
+  if (path.includes('://') || path.includes('\\')) return false;
+  if (!/^\/[A-Za-z0-9\/\-_?=&.%]*$/.test(path)) return false;
+  return true;
+}
+
 // Navigation guards
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   // Set page title
   document.title = to.meta.title ? `${to.meta.title} | Caddy Manager` : 'Caddy Manager';
   
   // Check if the route requires authentication
   if (to.meta.requiresAuth !== false) {
-    // Get auth store
     const authStore = useAuthStore();
     
     // If not authenticated, redirect to login
     if (!authStore.isAuthenticated) {
       next({ name: 'login', query: { redirect: to.fullPath } });
       return;
+    }
+    // Verify with backend if not yet verified (prevents localStorage tamper)
+    if (!authStore.verified) {
+      try { await authStore.fetchCurrentUser(); } catch (_) {}
+      if (!authStore.isAuthenticated) {
+        next({ name: 'login', query: { redirect: to.fullPath } });
+        return;
+      }
     }
     
     // Check if route requires admin role
@@ -184,6 +200,12 @@ router.beforeEach((to, from, next) => {
     const authStore = useAuthStore();
     
     if (authStore.isAuthenticated) {
+      // Validate redirect query to prevent open redirect
+      const redirect = to.query.redirect;
+      if (redirect && isSafeRedirect(redirect)) {
+        next(redirect);
+        return;
+      }
       next({ name: 'dashboard' });
       return;
     }

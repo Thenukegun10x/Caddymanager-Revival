@@ -1,6 +1,6 @@
 import axios from 'axios';
 import config from './configService';
-import apiService from './apiService';
+import apiService, { setMemoryToken, clearMemoryToken } from './apiService';
 
 // Get base API URL from environment or use default
 const API_URL = config.API.BASE_URL;
@@ -30,9 +30,9 @@ export default {
       
       if (response.data.user) {
         localStorage.setItem(config.STORAGE.USER_KEY || 'user', JSON.stringify(response.data.user));
-        // Keep token only in memory for non-cookie clients (not persisted)
+        // Keep token only in memory closure (not window, not localStorage)
         if (response.data.token) {
-          window.__auth_token = response.data.token;
+          setMemoryToken(response.data.token);
         }
         // Remove any legacy token from localStorage if present
         localStorage.removeItem(config.STORAGE.AUTH_TOKEN_KEY);
@@ -48,7 +48,7 @@ export default {
     try { await apiService.post(`/auth/logout`); } catch (_) {}
     localStorage.removeItem(config.STORAGE.AUTH_TOKEN_KEY);
     localStorage.removeItem(config.STORAGE.USER_KEY || 'user');
-    window.__auth_token = null;
+    clearMemoryToken();
   },
 
   // Get current user

@@ -5,12 +5,13 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: authService.getUser(),
     isAuthenticated: authService.isLoggedIn(),
+    verified: false,
     loading: false,
     error: null
   }),
   
   getters: {
-    isAdmin: (state) => state.user && state.user.role === 'admin',
+    isAdmin: (state) => state.verified && state.user && state.user.role === 'admin',
     username: (state) => state.user ? state.user.username : '',
     getUserRole: (state) => state.user ? state.user.role : '',
   },
@@ -24,6 +25,7 @@ export const useAuthStore = defineStore('auth', {
         const response = await authService.login(credentials);
         this.user = response.user;
         this.isAuthenticated = true;
+        this.verified = true;
         return response;
       } catch (error) {
         this.error = error.message || 'Login failed';
@@ -37,12 +39,14 @@ export const useAuthStore = defineStore('auth', {
       authService.logout();
       this.user = null;
       this.isAuthenticated = false;
+      this.verified = false;
     },
     
     async fetchCurrentUser() {
       if (!authService.isLoggedIn()) {
         this.user = null;
         this.isAuthenticated = false;
+        this.verified = false;
         return null;
       }
       
@@ -52,11 +56,14 @@ export const useAuthStore = defineStore('auth', {
         const response = await authService.getCurrentUser();
         this.user = response.user;
         this.isAuthenticated = true;
+        this.verified = true;
         return response.user;
       } catch (error) {
         // If token is invalid or expired, logout
         if (error.message?.includes('Not authorized') || error.message?.includes('jwt')) {
           this.logout();
+        } else {
+          this.verified = false;
         }
         this.error = error.message || 'Failed to fetch user data';
         return null;

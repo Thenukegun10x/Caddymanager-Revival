@@ -45,7 +45,11 @@ const auditLogController = {
       }
       
       if (username) {
-        filter['user.username'] = { $regex: username, $options: 'i' };
+        if (typeof username !== 'string') {
+          return res.status(400).json({ success: false, message: 'Invalid username filter' });
+        }
+        const clean = username.slice(0, 64).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter['user.username'] = { $regex: clean, $options: 'i' };
       }
       
       // Handle date range filter

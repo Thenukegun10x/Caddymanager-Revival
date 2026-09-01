@@ -24,6 +24,7 @@ function deepClone(obj, depth = 0, maxDepth = 50) {
   if (typeof obj === 'object') {
     const clonedObj = {};
     for (const key in obj) {
+      if (['__proto__', 'constructor', 'prototype'].includes(key)) continue;
       if (obj.hasOwnProperty(key)) {
         clonedObj[key] = deepClone(obj[key], depth + 1, maxDepth);
       }

@@ -70,19 +70,28 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/authStore';
 import { useCaddyServersStore } from '../stores/caddyServersStore';
 import { useCaddyConfigsStore } from '../stores/caddyConfigsStore';
 import InputFieldComp from '@/components/util/inputFieldComp.vue'
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 const serversStore = useCaddyServersStore();
 const configsStore = useCaddyConfigsStore();
 
 const username = ref('');
 const password = ref('');
+
+function isSafeRedirect(path) {
+  if (typeof path !== 'string') return false;
+  if (!path.startsWith('/')) return false;
+  if (path.startsWith('//') || path.startsWith('/\\')) return false;
+  if (path.includes('://') || path.includes('\\')) return false;
+  return true;
+}
 
 onMounted(() => {
   // Clear any previous errors
@@ -107,8 +116,13 @@ const handleLogin = async () => {
       configsStore.fetchAllConfigs()
     ]);
     
-    // Redirect to dashboard on successful login
-    router.push('/');
+    // Safe redirect (prevent open redirect)
+    const redirect = route.query.redirect;
+    if (redirect && isSafeRedirect(redirect)) {
+      router.push(redirect);
+    } else {
+      router.push('/');
+    }
   } catch (error) {
     // Error is already handled in the store
     console.error('Login failed:', error);

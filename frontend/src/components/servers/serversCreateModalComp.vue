@@ -113,8 +113,10 @@
             type="text"
             placeholder="/config/"
             :extraClass="'placeholder:text-gray-300'"
+            @input="validateForm"
           />
           <p class="mt-1 text-xs text-tertiary/70">The API path (default: /config/)</p>
+          <p v-if="errors.adminApiPath" class="mt-1 text-xs text-red-600">{{ errors.adminApiPath }}</p>
         </div>
 
         <!-- Additional Options -->
@@ -221,14 +223,16 @@ const formData = reactive({
 const errors = reactive({
   name: '',
   apiUrl: '',
-  apiPort: ''
+  apiPort: '',
+  adminApiPath: ''
 });
 
 // Computed properties
 const isFormValid = computed(() => {
   return formData.name.trim() !== '' && 
          isValidUrl(formData.apiUrl) && 
-         formData.apiPort > 0 && formData.apiPort <= 65535;
+         formData.apiPort > 0 && formData.apiPort <= 65535 &&
+         isValidAdminPath(formData.adminApiPath);
 });
 
 // Methods
@@ -243,22 +247,47 @@ function validateForm() {
   
   // Validate URL
   if (!isValidUrl(formData.apiUrl)) {
-    errors.apiUrl = 'Please enter a valid URL (e.g., http://localhost)';
+    errors.apiUrl = 'Please enter valid http(s) URL (e.g., http://localhost)';
+  } else if (isPrivateHost(formData.apiUrl)) {
+    errors.apiUrl = 'Private/metadata IP blocked for security (use public host)';
   }
 
   // Validate API Port
   if (formData.apiPort <= 0 || formData.apiPort > 65535) {
     errors.apiPort = 'Please enter a valid port number (1-65535)';
   }
+
+  // Validate admin path
+  if (!isValidAdminPath(formData.adminApiPath)) {
+    errors.adminApiPath = 'Must start with / and contain only alphanum/_-/.';
+  }
 }
 
 function isValidUrl(string) {
   try {
-    new URL(string);
+    const u = new URL(string);
+    if (!['http:', 'https:'].includes(u.protocol)) return false;
+    if (u.username || u.password) return false;
+    if (u.pathname && u.pathname !== '/' && u.pathname !== '' && u.pathname.includes('..')) return false;
     return true;
   } catch (_) {
     return false;
   }
+}
+function isPrivateHost(string) {
+  try {
+    const h = new URL(string).hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+    if (h === 'localhost') return false; // allow for dev
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.|127\.)/.test(h) || /^(::1|fc00:|fe80:|fd00:|::ffff:)/.test(h);
+  } catch { return true; }
+}
+function isValidAdminPath(p) {
+  if (!p) return true;
+  if (p.includes('://') || p.startsWith('//')) return false;
+  if (!p.startsWith('/')) return false;
+  if (!/^\/[A-Za-z0-9_\-\/.]*$/.test(p)) return false;
+  if (p.includes('..')) return false;
+  return true;
 }
 
 async function handleSubmit() {

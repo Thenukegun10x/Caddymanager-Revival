@@ -2,6 +2,11 @@ import axios from 'axios'
 import config from './configService'
 import router from '@/router'
 
+let memoryToken = null
+export function setMemoryToken(t) { memoryToken = t || null }
+export function clearMemoryToken() { memoryToken = null }
+export function getMemoryToken() { return memoryToken }
+
 /**
  * Returns a preconfigured axios instance for API calls
  * Uses the latest config for each request
@@ -21,8 +26,8 @@ function getApiClient() {
 
   apiClient.interceptors.request.use(
     (reqConfig) => {
-      // Prefer in-memory token (Set F), fallback to legacy localStorage, else rely on httpOnly cookie (withCredentials)
-      const token = (typeof window !== 'undefined' && window.__auth_token) || localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
+      // Prefer in-memory token (closure, not window), fallback to legacy localStorage, else rely on httpOnly cookie
+      const token = memoryToken || localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
       if (token) {
         reqConfig.headers.Authorization = `Bearer ${token}`
       }

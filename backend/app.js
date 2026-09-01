@@ -36,14 +36,14 @@ if (DB_ENGINE === 'mongodb') {
 }
 
 // Middleware — hardened per AGENTS.md §7 H2/H7
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
+const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : null;
 const corsOptions = {
   origin: allowedOrigins ? (origin, cb) => {
     if (!origin) return cb(null, true); // same-origin / curl
     if (allowedOrigins.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
-  } : '*',
-  credentials: true,
+  } : false,
+  credentials: !!allowedOrigins,
   methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','X-API-Key']
 };

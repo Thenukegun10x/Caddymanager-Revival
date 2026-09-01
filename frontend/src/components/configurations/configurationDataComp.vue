@@ -1158,6 +1158,7 @@ function deepMergeConfigs(target, source) {
   
   // Iterate through source object's properties
   Object.keys(source).forEach(key => {
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) return;
     // Special handling for arrays
     if (Array.isArray(source[key])) {
       if (key === 'routes' && Array.isArray(output[key])) {

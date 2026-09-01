@@ -31,10 +31,15 @@ const caddyController = {
   getAllServers: async (req, res) => {
     try {
       const servers = await caddyService.getAllServers();
+      // RBAC: non-admin only sees own servers (or legacy null)
+      let filtered = servers;
+      if (req.user.role !== 'admin') {
+        filtered = servers.filter(s => !s.createdBy || String(s.createdBy) === String(req.user.id));
+      }
       res.status(200).json({
         success: true,
-        count: servers.length,
-        data: servers
+        count: filtered.length,
+        data: filtered
       });
     } catch (error) {
       console.error('Error fetching servers:', error);
