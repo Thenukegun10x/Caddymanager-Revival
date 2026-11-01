@@ -50,15 +50,6 @@
                 <button
                   type="button"
                   class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
-                  :class="editMode === 'editor' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
-                  @click="editMode = 'editor'"
-                >
-                  <CodeBracketSquareIcon class="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-                  JSON Editor
-                </button>
-                <button
-                  type="button"
-                  class="px-3 py-1.5 text-xs flex items-center focus:outline-none"
                   :class="editMode === 'ace' ? 'bg-secondary text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'"
                   @click="editMode = 'ace'"
                 >
@@ -119,28 +110,6 @@
             </div>
           </div>
 
-          <!-- JSON Editor Mode -->
-          <div v-if="editMode === 'editor'" class="mb-4">
-            <label for="jsonEditor" class="block text-sm font-medium text-tertiary mb-2">Edit JSON Configuration</label>
-            <div class="relative border border-gray-300 rounded-md overflow-hidden">
-              <!-- Vue3 JSON Editor Component -->
-              <div class="h-[500px] overflow-auto">
-                <vue3-json-editor
-                  v-model="jsonEditorContent"
-                  :expandedOnStart="true"
-                  @json-change="onJsonChange"
-                  @has-error="onJsonError"
-                />
-              </div>
-              <div v-if="jsonValidationError" class="bg-red-50 border-t border-red-200 p-2 text-xs text-red-700">
-                {{ jsonValidationError }}
-              </div>
-            </div>
-            <p class="mt-1 text-xs text-gray-500">
-              Edit the JSON configuration directly. Changes will be saved when you click "Save Changes".
-            </p>
-          </div>
-          
           <!-- Ace Editor Mode -->
           <div v-if="editMode === 'ace'" class="mb-4">
             <label class="block text-sm font-medium text-tertiary mb-2">Raw JSON (Ace Editor)</label>
@@ -673,7 +642,6 @@ import { useCaddyServersStore } from '@/stores/caddyServersStore'
 import VueJsonPretty from 'vue-json-pretty'
 import 'vue-json-pretty/lib/styles.css'
 import { RouterLink, useRouter } from 'vue-router'
-import { Vue3JsonEditor } from 'vue3-json-editor'
 import aceEditorSubComp from '@/components/util/aceEditorSubComp.vue'
 import InputFieldComp from '@/components/util/inputFieldComp.vue'
 import SelectFieldComp from '@/components/util/selectFieldComp.vue'
@@ -734,9 +702,9 @@ const servers = computed(() => serversStore.servers)
 const viewMode = ref('structured')
 
 // Edit mode toggle
-const editMode = ref('editor')
+const editMode = ref('ace')
 
-// state for JSON editor
+// JSON configuration state (Ace is the source editor)
 const updateData = ref({})
 
 // Form-related refs for editing JSON
@@ -744,27 +712,16 @@ const formError = ref(null)
 const isSaving = ref(false)
 const saveSuccess = ref(false)
 const jsonEditorContent = ref({})
-const jsonValidationError = ref(null)
 // Ace Editor state
 const aceEditorContent = ref('')
 const aceJsonError = ref(null)
 
-// Sync Ace editor with JSON editor
+// Sync the raw Ace editor buffer with the parsed configuration state
 watch([jsonEditorContent, () => editMode.value], ([val, mode]) => {
   if (mode === 'ace') {
     aceEditorContent.value = JSON.stringify(val, null, 2)
   }
 })
-
-function onJsonError(error) {
-  jsonValidationError.value = error
-  emit('json-validation', !error)
-}
-
-function onJsonChange(value) {
-  jsonEditorContent.value = value
-  emit('json-content-updated', value)
-}
 
 function onAceJsonError(error) {
   aceJsonError.value = error
@@ -778,8 +735,11 @@ function onAceEditorInput(val) {
       const parsed = JSON.parse(val)
       jsonEditorContent.value = parsed
       emit('json-content-updated', parsed)
+      emit('json-validation', true)
+      aceJsonError.value = null
     } catch (e) {
-      // Ignore until valid
+      aceJsonError.value = `Invalid JSON: ${e.message}`
+      emit('json-validation', false)
     }
   }
 }
@@ -1137,7 +1097,7 @@ function addSelectedTemplate() {
     });
     
     // Switch to editor mode to show the changes
-    editMode.value = 'editor';
+    editMode.value = 'ace';
   } catch (err) {
     console.error('Error adding template:', err)
     formError.value = `Failed to add template: ${err.message}`
@@ -1396,7 +1356,7 @@ function useConversionResult() {
     
     // Reset conversion result and switch to editor mode
     conversionResult.value = null;
-    editMode.value = 'editor';
+    editMode.value = 'ace';
     
     // Show message about overwrites if any were detected
     if (overwrites.length > 0) {
@@ -1545,7 +1505,7 @@ function applyAndUseCustomizedTemplate() {
     });
     
     // Switch to editor mode to show the changes
-    editMode.value = 'editor';
+    editMode.value = 'ace';
   } catch (err) {
     console.error('Error adding customized template:', err);
     formError.value = `Failed to add customized template: ${err.message}`;
@@ -1565,19 +1525,4 @@ function hasCustomizableForm(templateId) {
   font-size: 13px;
 }
 
-/* Custom styling for vue3-json-editor */
-:deep(.jsoneditor) {
-  border: none !important;
-  height: 100%;
-}
-
-:deep(.jsoneditor-menu) {
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-:deep(.jsoneditor-statusbar) {
-  background-color: #f9fafb;
-  border-top: 1px solid #e5e7eb;
-}
 </style>

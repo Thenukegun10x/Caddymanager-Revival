@@ -22,8 +22,7 @@
     "tailwindcss": "^4.1.4",
     "vue": "^3.5.13",
     "vue-json-pretty": "^2.4.0",
-    "vue-router": "^4.5.0",
-    "vue3-json-editor": "^1.1.5"
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.3",
