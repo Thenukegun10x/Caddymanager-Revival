@@ -154,6 +154,12 @@ describe('AuthController', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Password updated successfully');
+
+      // C5: the stored value must be a bcrypt hash, not plaintext
+      const stored = await userRepository.findById(testUser.id || testUser._id, { includePassword: true });
+      expect(stored.password).toMatch(/^\$2[aby]\$/);
+      await expect(userRepository.comparePassword('newpassword123', stored.password)).resolves.toBe(true);
+      await expect(userRepository.comparePassword('password123', stored.password)).resolves.toBe(false);
     });
 
     it('should fail with incorrect current password', async () => {

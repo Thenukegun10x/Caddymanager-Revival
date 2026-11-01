@@ -134,6 +134,25 @@ const userRepository = {
     });
   },
 
+  /**
+   * Set a new password and rotate tokenVersion.
+   * Mongoose must go through save() so the pre-save hash hook runs;
+   * findByIdAndUpdate would otherwise persist the plaintext (C5).
+   */
+  async updatePassword(id, newPassword, tokenVersion) {
+    if (isMongoose()) {
+      const user = await UserModel.findById(id).select('+password');
+      if (!user) return null;
+      user.password = newPassword;
+      if (tokenVersion !== undefined) user.tokenVersion = tokenVersion;
+      await user.save();
+      return user;
+    }
+    const update = { password: newPassword };
+    if (tokenVersion !== undefined) update.tokenVersion = tokenVersion;
+    return UserModel.findByIdAndUpdate(id, update, { new: true });
+  },
+
   async findByIdAndDelete(id) {
     if (isMongoose()) {
       // Mongoose

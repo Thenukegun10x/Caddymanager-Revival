@@ -73,6 +73,26 @@ userSchema.pre('save', async function(next) {
   }
 });
 
+// Defense in depth (C5): any update path that sets a password must hash it.
+// findByIdAndUpdate/findOneAndUpdate bypass the save hook otherwise.
+userSchema.pre('findOneAndUpdate', async function(next) {
+  try {
+    const update = this.getUpdate() || {};
+    const isHash = (v) => typeof v === 'string' && /^\$2[aby]\$\d{2}\$/.test(v);
+
+    if (typeof update.password === 'string' && !isHash(update.password)) {
+      update.password = await bcrypt.hash(update.password, 10);
+    }
+    if (update.$set && typeof update.$set.password === 'string' && !isHash(update.$set.password)) {
+      update.$set.password = await bcrypt.hash(update.$set.password, 10);
+    }
+    this.setUpdate(update);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Method to compare passwords
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);

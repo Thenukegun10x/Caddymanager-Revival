@@ -267,9 +267,10 @@ exports.changePassword = async (req, res) => {
       });
     }
     
-    // Update password and rotate tokenVersion (invalidates old JWTs)
+    // Update password and rotate tokenVersion (invalidates old JWTs).
+    // updatePassword() hashes through the model hook — never persist plaintext (C5).
     const newVersion = (user.tokenVersion || 0) + 1;
-    await userRepository.findByIdAndUpdate(user.id || user._id, { password: newPassword, tokenVersion: newVersion });
+    await userRepository.updatePassword(user.id || user._id, newPassword, newVersion);
     
     // Log password change
     await auditService.logAction({
