@@ -10,6 +10,7 @@ const {
 } = require('../../utils/ssrf');
 const http = require('http');
 const axios = require('axios');
+const dns = require('dns');
 
 const ORIGINAL_ALLOW_PRIVATE = process.env.ALLOW_PRIVATE_IPS;
 
@@ -98,6 +99,62 @@ describe('SSRF hardening (C6)', () => {
     test('allows localhost only with explicit dev opt-in', () => {
       process.env.ALLOW_PRIVATE_IPS = 'true';
       expect(() => assertSafeApiUrl('http://localhost')).not.toThrow();
+    });
+  });
+
+  describe('production private-host allowlist (M9)', () => {
+    let originalNodeEnv;
+    let originalHosts;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      originalHosts = process.env.ALLOW_PRIVATE_HOSTS;
+      process.env.NODE_ENV = 'production';
+      // The legacy global switch must not weaken production SSRF checks.
+      process.env.ALLOW_PRIVATE_IPS = 'true';
+      process.env.ALLOW_PRIVATE_HOSTS = 'caddy.internal,10.20.0.15';
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+      if (originalHosts === undefined) delete process.env.ALLOW_PRIVATE_HOSTS;
+      else process.env.ALLOW_PRIVATE_HOSTS = originalHosts;
+      process.env.ALLOW_PRIVATE_IPS = 'false';
+    });
+
+    test('allows only exact allowlisted private hosts, not arbitrary private targets', () => {
+      expect(() => assertSafeApiUrl('http://caddy.internal')).not.toThrow();
+      expect(() => assertSafeApiUrl('http://10.20.0.15')).not.toThrow();
+      expect(() => assertSafeApiUrl('http://localhost')).toThrow(/Blocked private\/internal/);
+      expect(() => assertSafeApiUrl('http://other.internal')).toThrow(/Blocked private\/internal/);
+      expect(() => assertSafeApiUrl('http://10.20.0.16')).toThrow(/Blocked private\/internal/);
+      expect(() => assertSafeApiUrl('http://169.254.169.254')).toThrow(/Blocked private\/internal/);
+    });
+
+    test('connect-time DNS permits RFC1918 only for the allowlisted hostname', async () => {
+      const originalLookup = dns.lookup;
+      dns.lookup = (_host, _options, callback) => {
+        process.nextTick(() => callback(null, [{ address: '10.20.0.15', family: 4 }]));
+      };
+      try {
+        expect((await lookup('caddy.internal')).address).toBe('10.20.0.15');
+        await expect(lookup('other.internal')).rejects.toThrow(/Blocked private\/internal/);
+      } finally {
+        dns.lookup = originalLookup;
+      }
+    });
+
+    test('allowlisted hosts still cannot resolve to link-local metadata space', async () => {
+      const originalLookup = dns.lookup;
+      dns.lookup = (_host, _options, callback) => {
+        process.nextTick(() => callback(null, [{ address: '169.254.169.254', family: 4 }]));
+      };
+      try {
+        await expect(lookup('caddy.internal')).rejects.toThrow(/Blocked private\/internal/);
+      } finally {
+        dns.lookup = originalLookup;
+      }
     });
   });
 

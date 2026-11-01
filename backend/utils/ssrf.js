@@ -16,10 +16,27 @@ const http = require('http');
 const https = require('https');
 const tls = require('tls');
 
-// Explicit opt-in is required to talk to private/LAN addresses (local Caddy dev).
-function allowPrivateIps() {
-  return process.env.ALLOW_PRIVATE_IPS === 'true' ||
-    (process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false');
+function normalizeHostname(hostname) {
+  return String(hostname || '')
+    .replace(/^\[(.*)\]$/, '$1')
+    .replace(/\.$/, '')
+    .toLowerCase();
+}
+
+function privateHostAllowlist() {
+  return new Set(String(process.env.ALLOW_PRIVATE_HOSTS || '')
+    .split(',')
+    .map(normalizeHostname)
+    .filter(Boolean));
+}
+
+// Production can reach private addresses only when the exact target host is
+// explicitly allowlisted. The broad flag is limited to non-production/test use.
+function allowPrivateIps(hostname) {
+  const host = normalizeHostname(hostname);
+  if (process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false') return true;
+  if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_PRIVATE_IPS === 'true') return true;
+  return Boolean(host && privateHostAllowlist().has(host));
 }
 
 // Hosts that must never be reachable, even when private access is explicitly allowed.
@@ -148,11 +165,54 @@ function isBlockedAddress(address) {
   return true;
 }
 
-function normalizeHostname(hostname) {
-  return String(hostname || '')
-    .replace(/^\[(.*)\]$/, '$1')
-    .replace(/\.$/, '')
-    .toLowerCase();
+function isPrivateNetworkAddress(address) {
+  const family = net.isIP(address);
+  if (family === 4) {
+    const value = ipv4ToInt(address);
+    return [
+      ['10.0.0.0', 8],
+      ['172.16.0.0', 12],
+      ['192.168.0.0', 16],
+    ].some(([base, bits]) => {
+      const mask = (0xffffffff << (32 - bits)) >>> 0;
+      return (value & mask) === (ipv4ToInt(base) & mask);
+    });
+  }
+  if (family === 6) {
+    const bytes = ipv6ToBytes(address);
+    return Boolean(bytes && hasIPv6Prefix(bytesToBigInt(bytes), 'fc00::', 7));
+  }
+  return false;
+}
+
+function isAlwaysBlockedAddress(address) {
+  const family = net.isIP(address);
+  if (family === 4) {
+    const value = ipv4ToInt(address);
+    return [
+      ['0.0.0.0', 8],
+      ['127.0.0.0', 8],
+      ['169.254.0.0', 16],
+      ['224.0.0.0', 4],
+      ['240.0.0.0', 4],
+    ].some(([base, bits]) => {
+      const mask = (0xffffffff << (32 - bits)) >>> 0;
+      return (value & mask) === (ipv4ToInt(base) & mask);
+    });
+  }
+  if (family === 6) {
+    const bytes = ipv6ToBytes(address);
+    if (!bytes) return true;
+    const value = bytesToBigInt(bytes);
+    const awsMetadataV6 = bytesToBigInt(ipv6ToBytes('fd00:ec2::254'));
+    const gcpMetadataV6 = bytesToBigInt(ipv6ToBytes('fd20:ce::254'));
+    return value === 0n || value === 1n ||
+      hasIPv6Prefix(value, '::ffff:0:0', 96) ||
+      hasIPv6Prefix(value, 'fe80::', 10) ||
+      value === awsMetadataV6 ||
+      value === gcpMetadataV6;
+  }
+  return true;
 }
 
 function isBlockedHostname(hostname) {
@@ -161,11 +221,20 @@ function isBlockedHostname(hostname) {
 
   if (ALWAYS_BLOCKED_HOSTS.has(host)) return true;
 
-  // Explicit opt-in for local/LAN targets (development only)
-  if (allowPrivateIps()) return false;
-
   // A literal IP is handled by isBlockedAddress, not the name lists.
-  if (net.isIP(host)) return isBlockedAddress(host);
+  if (net.isIP(host)) {
+    if (isAlwaysBlockedAddress(host)) {
+      return process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false'
+        ? false
+        : true;
+    }
+    if (isBlockedAddress(host)) {
+      return !allowPrivateIps(host) || !isPrivateNetworkAddress(host);
+    }
+    return false;
+  }
+
+  if (allowPrivateIps(host)) return false;
 
   for (const alias of LOOPBACK_ALIAS_SUFFIXES) {
     if (host === alias || host.endsWith(`.${alias}`)) return true;
@@ -267,11 +336,15 @@ function safeLookup(hostname, options, callback) {
       return cb(new Error(`Unable to resolve host ${hostname}`));
     }
 
-    if (!allowPrivateIps()) {
-      for (const entry of addresses) {
-        if (isBlockedAddress(entry.address)) {
-          return cb(ssrfBlockedError(`Blocked private/internal address ${entry.address} for host ${hostname}`));
-        }
+    const explicitlyAllowed = allowPrivateIps(hostname);
+    const testOverride = process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false';
+    for (const entry of addresses) {
+      if (isAlwaysBlockedAddress(entry.address) && !testOverride) {
+        return cb(ssrfBlockedError(`Blocked private/internal address ${entry.address} for host ${hostname}`));
+      }
+      if (isBlockedAddress(entry.address) && !testOverride &&
+          (!explicitlyAllowed || !isPrivateNetworkAddress(entry.address))) {
+        return cb(ssrfBlockedError(`Blocked private/internal address ${entry.address} for host ${hostname}`));
       }
     }
 
@@ -293,7 +366,10 @@ function safeLookup(hostname, options, callback) {
 function createGuardedConnection(connectFn) {
   return (options, callback) => {
     const host = normalizeHostname(options && (options.host || options.hostname));
-    if (!allowPrivateIps() && net.isIP(host) && isBlockedAddress(host)) {
+    const testOverride = process.env.NODE_ENV === 'test' && process.env.ALLOW_PRIVATE_IPS !== 'false';
+    const privateLiteralAllowed = allowPrivateIps(host) && isPrivateNetworkAddress(host);
+    if (net.isIP(host) && isBlockedAddress(host) && !testOverride &&
+        (isAlwaysBlockedAddress(host) || !privateLiteralAllowed)) {
       const error = ssrfBlockedError(`Blocked private/internal address ${host}`);
       if (typeof callback === 'function') {
         process.nextTick(() => callback(error));
