@@ -8,32 +8,38 @@ try { ({ MongoMemoryServer } = require('mongodb-memory-server')); } catch (_) { 
 require('dotenv').config();
 
 let mongoServer = null; // Keep reference to memory server instance
+let connectPromise = null; // Idempotent: app import and test setup may both call
 
-const connectToMongo = async () => {
-  try {
-    if (dbConfig.isProduction && dbConfig.uri) {
-      // Production: Use real MongoDB
-      await mongoose.connect(dbConfig.uri, dbConfig.options);
-      console.log('Connected to MongoDB successfully (Production)');
-    } else {
-      if (!MongoMemoryServer) {
-        throw new Error('mongodb-memory-server not installed (pruned) — set MONGODB_URI or use DB_ENGINE=sqlite');
+const connectToMongo = () => {
+  if (!connectPromise) {
+    connectPromise = (async () => {
+      try {
+        if (dbConfig.isProduction && dbConfig.uri) {
+          // Production: Use real MongoDB
+          await mongoose.connect(dbConfig.uri, dbConfig.options);
+          console.log('Connected to MongoDB successfully (Production)');
+        } else {
+          if (!MongoMemoryServer) {
+            throw new Error('mongodb-memory-server not installed (pruned) — set MONGODB_URI or use DB_ENGINE=sqlite');
+          }
+          // Development: Use MongoDB Memory Server
+          console.log('Starting MongoDB Memory Server for development...');
+          mongoServer = await MongoMemoryServer.create(dbConfig.memoryServerOptions);
+          const uri = mongoServer.getUri();
+          await mongoose.connect(uri, dbConfig.options);
+          console.log('Connected to MongoDB Memory Server successfully (Development)');
+          console.log(`Memory Server URI: ${uri}`);
+        }
+
+        // Check for and create admin user if none exists
+        await createDefaultAdminIfNeeded();
+      } catch (error) {
+        console.error('Failed to connect to MongoDB:', error.message);
+        process.exit(1); // Exit with failure
       }
-      // Development: Use MongoDB Memory Server
-      console.log('Starting MongoDB Memory Server for development...');
-      mongoServer = await MongoMemoryServer.create(dbConfig.memoryServerOptions);
-      const uri = mongoServer.getUri();
-      await mongoose.connect(uri, dbConfig.options);
-      console.log('Connected to MongoDB Memory Server successfully (Development)');
-      console.log(`Memory Server URI: ${uri}`);
-    }
-    
-    // Check for and create admin user if none exists
-    await createDefaultAdminIfNeeded();
-  } catch (error) {
-    console.error('Failed to connect to MongoDB:', error.message);
-    process.exit(1); // Exit with failure
+    })();
   }
+  return connectPromise;
 };
 
 /**

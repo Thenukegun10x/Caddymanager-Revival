@@ -7,6 +7,8 @@ const dbConfig = {
   options: {
     useNewUrlParser: true,
     useUnifiedTopology: true,
+    // Fail with a clear error if the initial connection cannot be established
+    serverSelectionTimeoutMS: 30000,
   },
   isProduction,
   memoryServerOptions: {

@@ -28,8 +28,9 @@ const PORT = process.env.PORT || 3000;
 
 // Select and connect to the configured database engine
 const DB_ENGINE = process.env.DB_ENGINE || 'sqlite';
+let dbReady = Promise.resolve();
 if (DB_ENGINE === 'mongodb') {
-  connectToMongo();
+  dbReady = connectToMongo();
   console.log('Using MongoDB as the database engine.');
 } else if (DB_ENGINE === 'sqlite') {
   connectToSQLite();
@@ -132,9 +133,14 @@ app.use((req, res) => {
 
 // Start the server only if not in test environment
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Caddy Manager API server listening on port ${PORT}`);
-    console.log(`Ping service is running: ${pingService.getPingServiceStatus().running}`);
+  dbReady.then(() => {
+    app.listen(PORT, () => {
+      console.log(`Caddy Manager API server listening on port ${PORT}`);
+      console.log(`Ping service is running: ${pingService.getPingServiceStatus().running}`);
+    });
+  }).catch((error) => {
+    console.error(`FATAL: database connection failed: ${error.message}`);
+    process.exit(1);
   });
 }
 
