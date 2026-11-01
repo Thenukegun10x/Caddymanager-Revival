@@ -97,6 +97,7 @@ services:
       CORS_ORIGIN: "http://localhost:18080"
       CADDY_SANDBOX_URL: "http://caddy-sandbox:2020"
       JWT_SECRET: "${JWT_SECRET:?set in .env.test.local}" # fail fast, no fallback
+      ALLOW_PRIVATE_HOSTS: "caddy-server-1,caddy-server-2,caddy-sandbox"
 volumes:
   sqlite_data: # ephemeral when down -v
 networks:
@@ -108,9 +109,9 @@ networks:
 ```
 :80 {
   reverse_proxy frontend:80
-  header Strict-Transport-Security "max-age=31536000"
 }
 ```
+Set HSTS at the TLS-terminating proxy; this test edge is HTTP-only.
 
 **Common env overrides:** see `.env.example` + `docker-compose.yml:24-41`. Always set `JWT_SECRET` via `openssl rand -hex 32`; never use `your_jwt_secret_key_here` nor empty. `CORS_ORIGIN` must be allowlist, not `*`. `DB_ENGINE=sqlite` default (`SQLITE_DB_PATH=/app/data/caddymanager.sqlite`), or `mongodb` with `MONGODB_URI`.
 
@@ -140,7 +141,8 @@ JWT_SECRET= # REQUIRED, 32+ hex, no fallback (fix for middleware/authMiddleware.
 JWT_EXPIRATION=24h # code also reads JWT_EXPIRES_IN — support both
 ALLOW_BEARER_TOKEN=false # true only for CLI clients that need the token in the login body
 ADMIN_PASSWORD= # REQUIRED on first boot when users table is empty (12+ chars)
-ALLOW_PRIVATE_IPS=false # true only for local/test stacks that manage private Caddy targets
+ALLOW_PRIVATE_HOSTS= # comma-separated exact private Caddy target hostnames (production allowlist)
+ALLOW_PRIVATE_IPS=false # broad non-production/testing opt-in only; ignored in production
 ```
 
 **Frontend `frontend/.env` / Caddy `{$APP_NAME}` / `{$DARK_MODE}` / `{$BACKEND_HOST}`:**
@@ -220,7 +222,7 @@ To add servers in UI: `Servers -> Add Server -> API URL=http://caddy-server-1 (c
 ## 7. Agent Rules — Do Not Reintroduce PLAN.md:4 Bugs
 
 - **JWT:** Never add `|| 'hardcoded'`. `backend/middleware/authMiddleware.js:6` must `throw if !JWT_SECRET`, `jwt.verify(..., {algorithms:['HS256']})`. Support `JWT_EXPIRATION` + `JWT_EXPIRES_IN`.
-- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeApiUrl/assertSafeServerConfig` — deny RFC1918, CGNAT, loopback, link-local, metadata, ULA `fc00::/7`, `::`, `::1`; enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`. Use `axiosSafeOpts` (CIDR checks + `safeLookup` + literal-IP `createConnection` guard); never re-introduce string-prefix checks.
+- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeApiUrl/assertSafeServerConfig` — deny RFC1918/ULA unless the exact hostname is in `ALLOW_PRIVATE_HOSTS`; always deny CGNAT, loopback, link-local and metadata; enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`. Use `axiosSafeOpts` (CIDR checks + `safeLookup` + literal-IP `createConnection` guard); never re-introduce string-prefix checks or production-wide `ALLOW_PRIVATE_IPS` bypasses.
 - **API keys:** only `sha256(key)` at rest with an 8-char `keyPrefix`; plaintext is returned once at creation. `middleware/apiKeyPermissions.js` maps GET/HEAD→read, DELETE→delete, everything else→write, and blocks keys from auth/key-management routes.
 - **Errors:** respond with a generic message + `errorId` (`utils/httpError.js`); never return `error.message`/stacks in production. `app.js` installs `scrubErrorResponses` as defense in depth.
 - **Passwords/emails:** use the shared `utils/validate.js` schemas (12-128 chars, 3 character classes, common-password denylist, 254-char linear-time email). Never add a backtracking email regex.
@@ -257,4 +259,4 @@ gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{f
 docker compose config # validate merged yml
 ```
 
-*Last verified: 2026-11-01 on branch `fix/security-phase1` (C1-C7, H1-H8, M1-M3/M8/M11/M12, L1-L2; 261 SQLite + 37 Mongo tests green; full stack smoke through Caddy). Keep this file updated with every docker-compose or env change.*
+*Last verified: 2026-11-01 on branch `fix/security-phase1` (SQLite Jest 271/271; Mongo Jest 268 passed + 3 skipped; frontend audit 0 vulnerabilities; test Compose config valid; frontend/test Caddyfiles valid). Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*

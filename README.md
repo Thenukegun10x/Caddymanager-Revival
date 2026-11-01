@@ -26,7 +26,7 @@ Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack
 - **API Key Management:**
   - Generate and revoke API keys for programmatic access.
 - **Audit Logging:**
-  - Track all user and system actions for security and compliance.
+  - Track all user and system actions with a SHA-256 hash chain; admins can verify it at `/api/v1/audit-logs/integrity`.
 - **Real-Time Status:**
   - Live server health checks and status updates.
 - **Integrated Swagger API Docs:**
@@ -142,6 +142,8 @@ MONGODB_URI=mongodb://<user>:<password>@localhost:27017/caddymanager?authSource=
 CORS_ORIGIN=http://localhost:5173
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
+ALLOW_PRIVATE_HOSTS= # exact private Caddy target hostnames, comma-separated
+ALLOW_PRIVATE_IPS=false # non-production/test only; ignored in production
 PING_INTERVAL=30000
 PING_TIMEOUT=2000
 AUDIT_LOG_MAX_SIZE_MB=100
@@ -149,6 +151,7 @@ AUDIT_LOG_RETENTION_DAYS=90
 # REQUIRED: 32+ chars (openssl rand -hex 32). The backend refuses to boot otherwise.
 JWT_SECRET=
 JWT_EXPIRATION=24h
+ALLOW_BEARER_TOKEN=false
 # REQUIRED on first boot with an empty users table (12+ chars)
 ADMIN_PASSWORD=
 ```
@@ -159,6 +162,8 @@ ADMIN_PASSWORD=
 - `CORS_ORIGIN`: Allowed origin for frontend requests - should be the url of your frontend.
 - `LOG_LEVEL`: Logging verbosity.
 - `CADDY_SANDBOX_URL`: URL for the Caddy sandbox server (for testing) and/or validating configs.
+- `ALLOW_PRIVATE_HOSTS`: Exact private target hostnames explicitly trusted in production; their DNS results are still checked and metadata/link-local destinations are denied.
+- `ALLOW_PRIVATE_IPS`: Broad private-target opt-in for development/tests only; ignored in production.
 - `PING_INTERVAL` / `PING_TIMEOUT`: Health check intervals (ms).
 - `AUDIT_LOG_MAX_SIZE_MB` / `AUDIT_LOG_RETENTION_DAYS`: Audit log settings.
 - `METRICS_HISTORY_MAX`: Optional max number of in-memory metric history snapshots to keep (default: 1000).

@@ -334,3 +334,21 @@ curl -s -X POST http://localhost/api/v1/caddy/test-connection \
 # H5 — ReDoS (expect fast 400 after fix)
 python -c "print('a'*40+'!')"  # submit as email to PUT /api/v1/auth/update-profile
 ```
+
+---
+
+## Remediation follow-up — 2026-11-01
+
+The initial findings above are retained as the baseline. The following deferred items were implemented on `fix/security-phase1` after the initial sweep:
+
+| Finding | Follow-up |
+|---|---|
+| M4 — logout did not revoke copied tokens | Authenticated logout now increments `tokenVersion` in the active DB, clears current/legacy cookies, and rejects API-key logout. |
+| M5 — CSP allowed `unsafe-eval` | Removed `vue3-json-editor` (which required eval), retained Ace as the JSON editor, and removed `unsafe-eval`. HSTS was removed from HTTP-only frontend/test Caddy listeners; configure it at the actual TLS terminator. |
+| M7 — audit history could be modified without detection | New audit writes receive a sequence, previous hash, and SHA-256 entry hash in SQLite and MongoDB. Admins can verify via `GET /api/v1/audit-logs/integrity`; a damaged entry or broken link is reported. Legacy/expired history is reported as unanchored. |
+| M9 — broad private-IP opt-in | Production private Caddy targets now require an exact `ALLOW_PRIVATE_HOSTS` entry. DNS answers are still checked; loopback, link-local, metadata, CGNAT, and non-RFC1918/ULA blocked ranges remain denied. `ALLOW_PRIVATE_IPS` is ignored in production. |
+| MongoDB full-suite fixture parity | Mongo tests now use ObjectId-compatible user/server/config IDs; repository tests no longer force SQLite during Mongo runs. Full suite: 267 passed, 3 skipped. |
+
+**Verification after follow-up:** SQLite Jest 271/271; MongoDB Jest 268 passed, 3 skipped; frontend `npm audit --audit-level=high` reported 0 vulnerabilities; frontend and test-edge Caddyfiles validated; merged test Compose config validated.
+
+**Audit-chain limitation:** the chain detects accidental or partial database edits, but a database administrator capable of rewriting every row can recompute the chain. External signing/anchoring remains a separate hardening option. Retention policies can also remove old links; the verifier distinguishes a valid retained segment from a chain anchored at genesis.
