@@ -3,7 +3,46 @@ const caddyServersRepository = require('../repositories/caddyServersRepository')
 const auditService = require('../services/auditService');
 const { assertSafeApiUrl, assertSafePort, assertSafeAdminApiPath } = require('../utils/ssrf');
 
-// RBAC helper — allows admin always, otherwise checks createdBy (if present)
+// RBAC helpers — admins bypass, otherwise createdBy must match (legacy null stays shared)
+function isAdmin(req) {
+  return Boolean(req.user && req.user.role === 'admin');
+}
+
+function normalizeServerId(value) {
+  if (!value) return null;
+  if (typeof value === 'object') {
+    const id = value._id || value.id;
+    return id ? String(id) : String(value);
+  }
+  return String(value);
+}
+
+function configServerIds(config) {
+  if (!config) return [];
+  const raw = Array.isArray(config.servers) && config.servers.length
+    ? config.servers
+    : (config.server ? [config.server] : []);
+  return [...new Set(raw.map(normalizeServerId).filter(Boolean))];
+}
+
+// Verify the caller owns every referenced server. Responds 403/404 and returns false otherwise.
+async function checkServersAccess(req, res, serverIds) {
+  if (isAdmin(req)) return true;
+  const ids = [...new Set((serverIds || []).map(normalizeServerId).filter(Boolean))];
+  for (const id of ids) {
+    const server = await caddyServersRepository.findById(id);
+    if (!server) {
+      res.status(404).json({ success: false, message: 'Caddy server not found' });
+      return false;
+    }
+    if (server.createdBy && String(server.createdBy) !== String(req.user.id)) {
+      res.status(403).json({ success: false, message: 'Not authorized for this server' });
+      return false;
+    }
+  }
+  return true;
+}
+
 async function checkServerOwnership(req, res) {
   const serverId = req.params.id;
   const server = await caddyServersRepository.findById(serverId);
@@ -11,12 +50,40 @@ async function checkServerOwnership(req, res) {
     res.status(404).json({ success: false, message: 'Caddy server not found' });
     return null;
   }
-  // If createdBy is set, enforce ownership unless admin
-  if (server.createdBy && String(server.createdBy) !== String(req.user.id) && req.user.role !== 'admin') {
+  if (server.createdBy && String(server.createdBy) !== String(req.user.id) && !isAdmin(req)) {
     res.status(403).json({ success: false, message: 'Not authorized for this server' });
     return null;
   }
   return server;
+}
+
+// Configs have no owner column: access derives from every server the config references.
+// Standalone configs (no servers) are admin-only so they cannot leak across tenants.
+async function checkConfigOwnership(req, res) {
+  const configId = req.params.configId || req.params.id;
+  const config = await caddyService.getConfigById(configId);
+  if (!config) {
+    res.status(404).json({ success: false, message: 'Configuration not found' });
+    return null;
+  }
+  if (isAdmin(req)) return config;
+
+  const ids = configServerIds(config);
+  if (ids.length === 0) {
+    res.status(403).json({ success: false, message: 'Not authorized for this configuration' });
+    return null;
+  }
+  if (!(await checkServersAccess(req, res, ids))) return null;
+  return config;
+}
+
+function accessibleServerIds(req, servers) {
+  if (isAdmin(req)) return new Set(servers.map(s => normalizeServerId(s)));
+  return new Set(
+    servers
+      .filter(s => !s.createdBy || String(s.createdBy) === String(req.user.id))
+      .map(s => normalizeServerId(s))
+  );
 }
 
 /**
@@ -429,7 +496,13 @@ const caddyController = {
    */
   async checkAllServersStatus(req, res) {
     try {
-      const results = await caddyService.checkAllServersStatus();
+      // Non-admins may only probe servers they own (prevents cross-tenant pings/leaks)
+      let serverIds;
+      if (!isAdmin(req)) {
+        const servers = await caddyService.getAllServers();
+        serverIds = [...accessibleServerIds(req, servers)];
+      }
+      const results = await caddyService.checkAllServersStatus({ serverIds });
       
       // Enhance server details with additional information needed by the frontend
       if (Array.isArray(results.details)) {
@@ -637,16 +710,9 @@ const caddyController = {
    */
   getConfigById: async (req, res) => {
     try {
-      const configId = req.params.configId;
-      const config = await caddyService.getConfigById(configId);
-      
-      if (!config) {
-        return res.status(404).json({
-          success: false,
-          message: 'Configuration not found'
-        });
-      }
-      
+      const config = await checkConfigOwnership(req, res);
+      if (!config) return;
+
       res.status(200).json({
         success: true,
         message: 'Configuration retrieved successfully',
@@ -679,6 +745,9 @@ const caddyController = {
         // Single server mode (backward compatibility)
         serverIds = [serverId];
       }
+
+      // Every server touched by the config must belong to the caller (admin bypass)
+      if (!(await checkServersAccess(req, res, [serverId, ...serverIds]))) return;
       
       const configData = {
         servers: serverIds,
@@ -756,9 +825,16 @@ const caddyController = {
   applyConfig: async (req, res) => {
     try {
       const configId = req.params.configId;
-      
+      const config = await checkConfigOwnership(req, res);
+      if (!config) return;
+
       // Check if specific servers were provided in the request body
       const targetServerIds = req.body.serverIds || null;
+      if (targetServerIds !== null && !Array.isArray(targetServerIds)) {
+        return res.status(400).json({ success: false, message: 'serverIds must be an array' });
+      }
+      // Applying a config to arbitrary servers must also be ownership-checked
+      if (targetServerIds && !(await checkServersAccess(req, res, targetServerIds))) return;
       
       const result = await caddyService.applyConfigToServer(configId, targetServerIds);
       
@@ -854,11 +930,24 @@ const caddyController = {
     try {
       // Extract optional filter parameters
       const { status, server } = req.query;
-      
-      const configs = await caddyService.getAllConfigs({ 
+
+      // A non-admin asking for someone else's server gets 403, not a filtered list
+      if (server && !(await checkServersAccess(req, res, [server]))) return;
+
+      let configs = await caddyService.getAllConfigs({ 
         status,
         server 
       });
+
+      // Configs are a shared object space; derive visibility from owned servers
+      if (!isAdmin(req)) {
+        const servers = await caddyService.getAllServers();
+        const visible = accessibleServerIds(req, servers);
+        configs = configs.filter(config => {
+          const ids = configServerIds(config);
+          return ids.length > 0 && ids.every(id => visible.has(id));
+        });
+      }
       
       res.status(200).json({
         success: true,
@@ -884,6 +973,9 @@ const caddyController = {
   deleteConfig: async (req, res) => {
     try {
       const configId = req.params.id;
+      const ownedConfig = await checkConfigOwnership(req, res);
+      if (!ownedConfig) return;
+
       const deletedConfig = await caddyService.deleteConfig(configId);
       
       if (!deletedConfig) {
@@ -932,7 +1024,18 @@ const caddyController = {
     try {
       const configId = req.params.id;
       const updateData = req.body;
-      
+
+      const ownedConfig = await checkConfigOwnership(req, res);
+      if (!ownedConfig) return;
+
+      // Re-assigning a config to different servers must respect ownership too
+      if (updateData.servers !== undefined) {
+        if (!Array.isArray(updateData.servers)) {
+          return res.status(400).json({ success: false, message: 'servers must be an array' });
+        }
+        if (!(await checkServersAccess(req, res, updateData.servers))) return;
+      }
+
       const updatedConfig = await caddyService.updateConfigMetadata(configId, updateData);
       
       if (!updatedConfig) {
@@ -981,7 +1084,10 @@ const caddyController = {
     try {
       const configId = req.params.id;
       const contentData = req.body;
-      
+
+      const ownedConfig = await checkConfigOwnership(req, res);
+      if (!ownedConfig) return;
+
       const updatedConfig = await caddyService.updateConfigContent(configId, contentData);
       
       if (!updatedConfig) {
@@ -1029,7 +1135,20 @@ const caddyController = {
   addConfig: async (req, res) => {
     try {
       const configData = req.body;
-      
+
+      // Normalize servers the same way the service does, then enforce ownership.
+      // Non-admins must attach a config to at least one server they own.
+      const serverIds = Array.isArray(configData.servers) && configData.servers.length
+        ? configData.servers
+        : (configData.server ? [configData.server] : []);
+      if (!isAdmin(req) && serverIds.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'Non-admin configurations must reference at least one server you own'
+        });
+      }
+      if (!(await checkServersAccess(req, res, serverIds))) return;
+
       const newConfig = await caddyService.addConfig(configData);
       
       // Log the configuration addition to audit log
