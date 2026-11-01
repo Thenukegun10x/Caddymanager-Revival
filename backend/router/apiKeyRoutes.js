@@ -1,5 +1,6 @@
 const express = require('express');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { rejectApiKey } = require('../middleware/apiKeyPermissions');
 const apiKeyController = require('../controllers/apiKeyController');
 
 const router = express.Router();
@@ -60,8 +61,8 @@ const router = express.Router();
 
 // All routes in this file are prefixed with /api/v1/keys in the main app router
 
-// All routes require authentication
-router.use(protect);
+// All routes require authentication. API keys cannot mint or revoke keys (self-escalation).
+router.use(protect, rejectApiKey);
 
 /**
  * @swagger

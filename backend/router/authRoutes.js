@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { rejectApiKey } = require('../middleware/apiKeyPermissions');
 const { validate, loginSchema } = require('../utils/validate');
 
 /**
@@ -72,8 +73,8 @@ const { validate, loginSchema } = require('../utils/validate');
 router.post('/login', validate(loginSchema), authController.login);
 router.post('/logout', authController.logout);
 
-// Protected routes - require authentication
-router.use(protect);
+// Protected routes - require authentication; API keys may not manage users/credentials
+router.use(protect, rejectApiKey);
 
 /**
  * @swagger

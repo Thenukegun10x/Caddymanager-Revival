@@ -1,12 +1,13 @@
 const express = require('express');
 const caddyController = require('../controllers/caddyController');
 const { protect } = require('../middleware/authMiddleware');
+const { enforceApiKeyPermissions } = require('../middleware/apiKeyPermissions');
 const { validate, serverCreateSchema, serverUpdateSchema, testConnectionSchema, configCreateSchema } = require('../utils/validate');
 // All routes in this file are prefixed with /api/v1/caddy in the main app router
 const router = express.Router();
 
-// Apply authentication middleware to all Caddy routes
-router.use(protect);
+// Apply authentication + API-key permission middleware to all Caddy routes
+router.use(protect, enforceApiKeyPermissions);
 
 /**
  * @swagger

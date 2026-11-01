@@ -1,11 +1,12 @@
 const express = require('express');
 const convertController = require('../controllers/convertController');
 const { protect } = require('../middleware/authMiddleware');
+const { enforceApiKeyPermissions } = require('../middleware/apiKeyPermissions');
 
 const router = express.Router();
 
-// Apply authentication middleware to all convert routes
-router.use(protect);
+// Apply authentication + API-key permission middleware to all convert routes
+router.use(protect, enforceApiKeyPermissions);
 
 /**
  * @swagger
