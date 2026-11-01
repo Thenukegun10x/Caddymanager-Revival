@@ -19,6 +19,9 @@ const auditLogRepository = {
   },
 
   async findAll({ limit = 100, offset = 0 } = {}) {
+    // Normalize caller-controlled pagination consistently across Mongo/SQLite.
+    limit = Math.max(1, parseInt(limit, 10) || 100);
+    offset = Math.max(0, parseInt(offset, 10) || 0);
     if (typeof AuditLogModel.find === 'function') {
       // Mongoose
       return AuditLogModel.find({})

@@ -1,4 +1,9 @@
 const caddyService = require('../../services/caddyService');
+const mongoose = require('mongoose');
+
+const isMongo = process.env.DB_ENGINE === 'mongodb';
+const missingRecordId = () => isMongo ? new mongoose.Types.ObjectId() : 99999;
+const missingServerObjectId = isMongo ? new mongoose.Types.ObjectId() : 'invalid-server-id-123456';
 
 // Mock axios to prevent actual HTTP calls
 jest.mock('axios');
@@ -250,7 +255,7 @@ describe('CaddyService Integration', () => {
     });
 
     test('should return null when deleting non-existent configuration', async () => {
-      const result = await caddyService.deleteConfig(99999);
+      const result = await caddyService.deleteConfig(missingRecordId());
       expect(result).toBeNull();
     });
 
@@ -301,7 +306,7 @@ describe('CaddyService Integration', () => {
   describe('Error Handling', () => {
     test('should handle server not found errors', async () => {
       try {
-        await caddyService.getServerById(99999);
+        await caddyService.getServerById(missingRecordId());
         // SQLite returns null, MongoDB might throw
         expect(true).toBe(true);
       } catch (error) {
@@ -310,14 +315,14 @@ describe('CaddyService Integration', () => {
     });
 
     test('should handle configuration not found errors', async () => {
-      const result = await caddyService.getConfigById(99999);
+      const result = await caddyService.getConfigById(missingRecordId());
       expect(result).toBeNull();
     });
 
     test('should handle invalid server references in configuration', async () => {
       const configWithInvalidServer = {
         ...mockConfigData,
-        servers: ['invalid-server-id-123456']
+        servers: [missingServerObjectId]
       };
       
       try {

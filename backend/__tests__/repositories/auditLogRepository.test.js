@@ -1,4 +1,11 @@
 const auditLogRepository = require('../../repositories/auditLogRepository');
+const mongoose = require('mongoose');
+
+const isMongo = process.env.DB_ENGINE === 'mongodb';
+const userId1 = isMongo ? new mongoose.Types.ObjectId() : 123;
+const userId2 = isMongo ? new mongoose.Types.ObjectId() : 456;
+const missingUserId = isMongo ? new mongoose.Types.ObjectId() : 999;
+const missingAuditId = isMongo ? new mongoose.Types.ObjectId() : 'non-existent-id';
 
 describe('auditLogRepository', () => {
   let testLogs = [];
@@ -7,7 +14,7 @@ describe('auditLogRepository', () => {
   const sampleLogData = {
     action: 'create',
     user: {
-      userId: 123,
+      userId: userId1,
       username: 'testuser'
     },
     resourceType: 'server',
@@ -21,7 +28,7 @@ describe('auditLogRepository', () => {
   const sampleLogData2 = {
     action: 'update',
     user: {
-      userId: 456,
+      userId: userId2,
       username: 'anotheruser'
     },
     resourceType: 'config',
@@ -144,7 +151,7 @@ describe('auditLogRepository', () => {
     });
 
     test('should return null for non-existent ID', async () => {
-      const result = await auditLogRepository.findById('non-existent-id');
+       const result = await auditLogRepository.findById(missingAuditId);
       
       expect(result).toBeNull();
     });
@@ -216,25 +223,25 @@ describe('auditLogRepository', () => {
       // Create logs for different users
       const user1Log = await auditLogRepository.create({
         ...sampleLogData,
-        user: { userId: 123, username: 'user1' }
+        user: { userId: userId1, username: 'user1' }
       });
       
       const user2Log = await auditLogRepository.create({
         ...sampleLogData2,
-        user: { userId: 456, username: 'user2' }
+        user: { userId: userId2, username: 'user2' }
       });
       
       const anotherUser1Log = await auditLogRepository.create({
         ...sampleLogData,
         action: 'delete',
-        user: { userId: 123, username: 'user1' }
+        user: { userId: userId1, username: 'user1' }
       });
       
       testLogs.push(user1Log, user2Log, anotherUser1Log);
     });
 
     test('should find logs by user ID', async () => {
-      const result = await auditLogRepository.findByUser(123);
+      const result = await auditLogRepository.findByUser(userId1);
       
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBeGreaterThan(0);
@@ -243,19 +250,19 @@ describe('auditLogRepository', () => {
       result.forEach(log => {
         // Handle both SQLite (userId field) and potential MongoDB (user.userId) structures
         const logUserId = log.userId || (log.user && log.user.userId);
-        expect(logUserId).toBe(123);
+        expect(String(logUserId)).toBe(String(userId1));
       });
     });
 
     test('should handle pagination for user logs', async () => {
-      const result = await auditLogRepository.findByUser(123, { limit: 1, offset: 0 });
+      const result = await auditLogRepository.findByUser(userId1, { limit: 1, offset: 0 });
       
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBeLessThanOrEqual(1);
     });
 
     test('should return empty array for non-existent user', async () => {
-      const result = await auditLogRepository.findByUser(999);
+      const result = await auditLogRepository.findByUser(missingUserId);
       
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBe(0);
