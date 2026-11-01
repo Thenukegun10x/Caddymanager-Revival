@@ -257,4 +257,4 @@ gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{f
 docker compose config # validate merged yml
 ```
 
-*Last verified: 2026-09-01 @14cfcbad. Keep this file updated with every docker-compose or env change.*
+*Last verified: 2026-11-01 on branch `fix/security-phase1` (C1-C7, H1-H8, M1-M3/M8/M11/M12, L1-L2; 261 SQLite + 37 Mongo tests green; full stack smoke through Caddy). Keep this file updated with every docker-compose or env change.*
