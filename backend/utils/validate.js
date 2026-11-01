@@ -9,8 +9,15 @@ function jsonWithinLimit(obj, limit = 1024 * 1024) {
   }
 }
 
+const serverNameSchema = z.string()
+  .trim()
+  .min(1)
+  .max(100)
+  // M11: no CR/LF or YAML/header metacharacters in a name that reaches headers
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._ -]*$/, 'name may contain letters, digits, space, dot, dash, underscore');
+
 const serverCreateSchema = z.object({
-  name: z.string().trim().min(1).max(100),
+  name: serverNameSchema,
   apiUrl: z.string().trim().url().max(2048),
   apiPort: z.coerce.number().int().min(1).max(65535).default(2019),
   adminApiPath: z.string().trim().regex(/^\/[A-Za-z0-9_\-\/.]*$/).default('/config/'),
@@ -21,7 +28,7 @@ const serverCreateSchema = z.object({
 }).passthrough(); // allow createdBy etc but will be filtered by sql whitelist
 
 const serverUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
+  name: serverNameSchema.optional(),
   apiUrl: z.string().trim().url().max(2048).optional(),
   apiPort: z.coerce.number().int().min(1).max(65535).optional(),
   adminApiPath: z.string().trim().regex(/^\/[A-Za-z0-9_\-\/.]*$/).optional(),

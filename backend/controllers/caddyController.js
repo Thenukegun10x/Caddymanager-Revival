@@ -620,9 +620,10 @@ const caddyController = {
       
       const dockerComposeContent = caddyService.generateDockerComposeFile(server);
       
-      // Set headers for file download
+      // Set headers for file download (M11: strip CR/LF and quotes from the name)
+      const safeName = String(server.name || 'server').replace(/[^A-Za-z0-9._ -]/g, '_').slice(0, 100) || 'server';
       res.setHeader('Content-Type', 'application/yaml');
-      res.setHeader('Content-Disposition', `attachment; filename=docker-compose-${server.name}.yml`);
+      res.setHeader('Content-Disposition', `attachment; filename="docker-compose-${safeName}.yml"`);
       
       // Send the file content
       res.status(200).send(dockerComposeContent);
