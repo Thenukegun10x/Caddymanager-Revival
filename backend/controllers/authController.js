@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const userRepository = require('../repositories/userRepository');
 const auditService = require('../services/auditService');
 const { getJwtSecret } = require('../utils/jwtSecret');
+const { sendError } = require('../utils/httpError');
 
 // Fail fast if JWT_SECRET is missing/short/placeholder (C1); support both
 // JWT_EXPIRES_IN and JWT_EXPIRATION
@@ -161,7 +162,7 @@ exports.logout = async (req, res) => {
     res.clearCookie('__Host-auth_token', { ...cookie.options, secure: true });
     res.json({ success: true, message: 'Logged out' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Unable to log out' });
+    return sendError(req, res, 500, 'Unable to log out', error);
   }
 };
 

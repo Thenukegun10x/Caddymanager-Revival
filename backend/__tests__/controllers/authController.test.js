@@ -141,6 +141,28 @@ describe('AuthController', () => {
         .set('x-api-key', keyValue);
       expect(keyLogout.status).toBe(403);
     });
+
+    it('returns a generic correlated error in production if revocation fails', async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      const revocation = jest.spyOn(userRepository, 'incrementTokenVersion')
+        .mockRejectedValueOnce(new Error('database internals must not leak'));
+      let response;
+      try {
+        response = await request(app)
+          .post('/api/v1/auth/logout')
+          .set('Cookie', `auth_token=${authToken}`);
+      } finally {
+        revocation.mockRestore();
+        if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalNodeEnv;
+      }
+
+      expect(response.status).toBe(500);
+      expect(response.body.message).toBe('Unable to log out');
+      expect(response.body.errorId).toMatch(/^[a-f0-9]{12}$/);
+      expect(JSON.stringify(response.body)).not.toContain('database internals');
+    });
   });
 
   describe('GET /auth/me', () => {

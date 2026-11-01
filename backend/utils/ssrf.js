@@ -290,10 +290,9 @@ function assertSafeAdminApiPath(p) {
     throw new Error('adminApiPath must be a path, not a URL (blocked SSRF override)');
   }
   if (!p.startsWith('/')) throw new Error('adminApiPath must start with /');
-  if (!/^\/[A-Za-z0-9_\-\/.]*$/.test(p)) {
+  if (!/^\/[\w\/-]*$/.test(p)) {
     throw new Error(`Invalid adminApiPath ${p}`);
   }
-  if (p.includes('..')) throw new Error('adminApiPath must not contain ..');
   return p;
 }
 

@@ -4,6 +4,7 @@
  */
 const {
   assertSafeApiUrl,
+  assertSafeAdminApiPath,
   isBlockedAddress,
   safeLookup,
   axiosSafeOpts,
@@ -169,6 +170,11 @@ describe('SSRF hardening (C6)', () => {
 
     test('rejects a path', () => {
       expect(() => assertSafeApiUrl('http://example.com/admin')).toThrow(/origin only/);
+    });
+
+    test('restricts admin API paths to slash-separated word/dash segments', () => {
+      expect(assertSafeAdminApiPath('/config/')).toBe('/config/');
+      expect(() => assertSafeAdminApiPath('/config/.well-known')).toThrow(/Invalid adminApiPath/);
     });
 
     test('rejects query and hash', () => {
