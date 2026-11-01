@@ -47,10 +47,9 @@ jobs:
           JWT_SECRET: ci-test-secret-do-not-use-in-prod
           NODE_ENV: test
         run: npm run test:coverage -- --runInBand
-      - name: npm audit — warn on high (not blocking until dep upgrades land, see PLAN.md)
+      - name: npm audit - block on high
         working-directory: backend
-        continue-on-error: true
-        run: npm audit --audit-level=high || echo "::warning::backend audit high — track in PLAN.md H3"
+        run: npm audit --audit-level=high
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -71,10 +70,9 @@ jobs:
       - name: Install (frontend)
         working-directory: frontend
         run: npm ci
-      - name: Audit (frontend) — warn on high (vite/axios transitive, see PLAN.md H3)
+      - name: Audit (frontend) - block on high
         working-directory: frontend
-        continue-on-error: true
-        run: npm audit --audit-level=high || echo "::warning::frontend audit high — track in PLAN.md H3"
+        run: npm audit --audit-level=high
       - name: Build
         working-directory: frontend
         run: npm run build
@@ -162,6 +160,10 @@ jobs:
         with:
           sarif_file: trivy-fs.sarif
       - name: Docker config validate
+        env:
+          # Placeholders only — config interpolation requires them to be set
+          JWT_SECRET: ci-compose-validation-secret-at-least-32-chars
+          ADMIN_PASSWORD: ci-compose-validation-password
         run: |
           docker compose -f docker-compose.build.yml config >/dev/null
           docker compose -f docker-compose.build.yml -f docker-compose.test.yml config >/dev/null

@@ -39,6 +39,9 @@ build/
 # Coverage
 coverage/
 
+# Local audit artifacts
+audit-*.json
+
 # Misc
 *.local
 *.cache
