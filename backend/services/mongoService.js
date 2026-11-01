@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const dbConfig = require('../config/dbConfig');
 // Lazy require to avoid needing dev dep when DB_ENGINE=sqlite (pruned image)
 let MongoMemoryServer;
@@ -35,39 +37,64 @@ const connectToMongo = async () => {
 };
 
 /**
+ * Resolve the first-boot admin password.
+ * - Explicit ADMIN_PASSWORD (12+ chars) wins.
+ * - Production refuses to bootstrap with no password.
+ * - Development generates a random one and logs it once.
+ */
+const resolveBootstrapAdminPassword = () => {
+  const provided = process.env.ADMIN_PASSWORD;
+  if (provided) {
+    if (provided.length < 12) {
+      throw new Error('ADMIN_PASSWORD must be at least 12 characters');
+    }
+    return { password: provided, generated: false };
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('ADMIN_PASSWORD is required to bootstrap the first admin in production');
+  }
+  return { password: crypto.randomBytes(18).toString('base64url'), generated: true };
+};
+
+/**
  * Check if any users exist in the database.
- * If not, create a default admin user with credentials:
- * username: admin
- * password: caddyrocks
+ * If not, create the bootstrap admin (random password in dev, ADMIN_PASSWORD in prod).
  */
 const createDefaultAdminIfNeeded = async () => {
-  try {
-    // We need to require the User model here to avoid circular dependencies
-    const User = require('../models/user/userMongoModel');
-    
-    // Count users in the database
-    const userCount = await User.countDocuments();
-    
-    // If no users exist, create the default admin
-    if (userCount === 0) {
-      console.log('No users found in database. Creating default admin user...');
-      
-      const adminUser = new User({
-        username: 'admin',
-        password: 'caddyrocks', // This will be hashed by the pre-save hook
-        role: 'admin',
-        isActive: true
-      });
-      
-      await adminUser.save();
-      console.log('Default admin user created successfully.');
-      console.log('Username: admin');
-      console.log('Password: caddyrocks');
-      console.log('Please change this password immediately after first login.');
+  // Require the User model here to avoid circular dependencies
+  const User = require('../models/user/userMongoModel');
+
+  const userCount = await User.countDocuments();
+
+  if (userCount === 0) {
+    const { password, generated } = resolveBootstrapAdminPassword();
+    console.log('No users found in database. Creating bootstrap admin user...');
+
+    const adminUser = new User({
+      username: 'admin',
+      password, // hashed by the pre-save hook
+      role: 'admin',
+      isActive: true
+    });
+
+    await adminUser.save();
+    console.log('Bootstrap admin user created successfully.');
+    console.log('Username: admin');
+    if (generated) {
+      console.log(`Generated admin password (shown once — change it after login): ${password}`);
+    } else {
+      console.log('Password: [from ADMIN_PASSWORD]');
     }
-  } catch (error) {
-    console.error('Error creating default admin user:', error.message);
-    // Don't exit the process here, just log the error
+  }
+
+  // Warn loudly if an existing admin still uses the old public default password.
+  const admins = await User.find({ role: 'admin' }).select('+password');
+  for (const admin of admins) {
+    if (admin.password && (await bcrypt.compare('caddyrocks', admin.password))) {
+      console.error(
+        `[SECURITY] Admin "${admin.username}" still uses the old public default password. Change it now.`
+      );
+    }
   }
 };
 

@@ -40,11 +40,11 @@ PLAN.md / NOTICE.md / SECURITY.md  hardened fork docs
 ### A. Bare metal (fastest for agents)
 ```bash
 # backend
-cd backend && npm ci && cp .env.example .env # set JWT_SECRET=$(openssl rand -hex 32)
+cd backend && npm ci && cp .env.example .env # set JWT_SECRET=$(openssl rand -hex 32) and ADMIN_PASSWORD
 npm run dev # :3000
 # frontend in second shell
 cd frontend && npm install && npm run dev # :5173, proxy to :3000 via vite.config.js
-# login admin:caddyrocks -> change immediately
+# first boot: login admin:<ADMIN_PASSWORD>; the old caddyrocks default is gone
 ```
 
 ### B. Docker built from source (closest to CI)
@@ -136,6 +136,8 @@ AUDIT_LOG_RETENTION_DAYS=90
 METRICS_HISTORY_MAX=1000
 JWT_SECRET= # REQUIRED, 32+ hex, no fallback (fix for middleware/authMiddleware.js:6)
 JWT_EXPIRATION=24h # code also reads JWT_EXPIRES_IN — support both
+ADMIN_PASSWORD= # REQUIRED on first boot when users table is empty (12+ chars)
+ALLOW_PRIVATE_IPS=false # true only for local/test stacks that manage private Caddy targets
 ```
 
 **Frontend `frontend/.env` / Caddy `{$APP_NAME}` / `{$DARK_MODE}` / `{$BACKEND_HOST}`:**
@@ -171,7 +173,7 @@ docker compose -f docker-compose.build.yml down -v
 
 ### Security PoCs (run against docker, expect DENY after Phase 1)
 ```bash
-TOKEN=$(curl -s http://localhost:18080/api/v1/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"caddyrocks"}' | jq -r .token)
+TOKEN=$(curl -s http://localhost:18080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" | jq -r .token)
 # C2 SSRF
 curl -s http://localhost:18080/api/v1/caddy/test-connection -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"apiUrl":"http://169.254.169.254","apiPort":80,"adminApiPath":"/latest/meta-data/"}' | jq # -> 400
 # C3 SQLi

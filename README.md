@@ -175,7 +175,7 @@ JWT_EXPIRATION=24h
 - `METRICS_HISTORY_MAX`: Optional max number of in-memory metric history snapshots to keep (default: 1000).
 - `JWT_SECRET` / `JWT_EXPIRATION`: JWT credential settings
 
-> **Note:** The default CaddyManager user when first creating the app is `admin` with password `caddyrocks`. You can change this after logging in.
+> **Note:** On first boot, set `ADMIN_PASSWORD` (12+ characters) in `.env` before starting the backend. The bootstrap admin is `admin` with that password. The old public `caddyrocks` default has been removed.
 
 > **Tip:** Copy `.env.example` to `.env` in each directory and adjust values as needed for your environment.
 
@@ -189,7 +189,7 @@ CaddyManager supports two database engines:
 - **Zero Configuration**: Works out of the box, no setup required
 - **Single File**: All data stored in a single `.sqlite` file
 - **Perfect for**: Small to medium deployments, development, testing
-- **Automatic Setup**: Creates admin user (`admin`/`caddyrocks`) on first run
+- **Automatic Setup**: Creates the `admin` user from `ADMIN_PASSWORD` on first run (no public default)
 
 ### MongoDB
 - **Scalable**: Better for high-traffic, multi-user environments
@@ -280,7 +280,8 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
      cd frontend && npm run dev
      ```
 5. **Login:**
-   - Default admin credentials: `admin` / `caddyrocks`
+   - Admin username: `admin`
+   - Password: the `ADMIN_PASSWORD` you set in `.env`
 
 ---
 
@@ -290,7 +291,7 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
    - Open your browser and go to `http://localhost` (or the address where your frontend is running).
 
 2. **Sign In:**
-   - Log in using the default admin credentials (`admin` / `caddyrocks`).
+   - Log in as `admin` with the `ADMIN_PASSWORD` you configured.
 
 3. **Add and Manage Servers:**
    - Navigate to the "Servers" section to add, edit, or remove Caddy servers.

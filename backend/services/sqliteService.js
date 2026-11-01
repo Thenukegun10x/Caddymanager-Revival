@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
@@ -138,31 +139,67 @@ const createTablesIfNeeded = () => {
 };
 
 /**
- * Check if any users exist in the database.
- * If not, create a default admin user with credentials:
- * username: admin
- * password: caddyrocks
+ * Resolve the first-boot admin password.
+ * - Explicit ADMIN_PASSWORD (12+ chars) wins.
+ * - Production refuses to bootstrap with no password.
+ * - Development generates a random one and logs it once.
  */
-const createDefaultAdminIfNeeded = () => {
+const resolveBootstrapAdminPassword = () => {
+	const provided = process.env.ADMIN_PASSWORD;
+	if (provided) {
+		if (provided.length < 12) {
+			throw new Error('ADMIN_PASSWORD must be at least 12 characters');
+		}
+		return { password: provided, generated: false };
+	}
+	if (process.env.NODE_ENV === 'production') {
+		throw new Error('ADMIN_PASSWORD is required to bootstrap the first admin in production');
+	}
+	return { password: crypto.randomBytes(18).toString('base64url'), generated: true };
+};
+
+/**
+ * Warn loudly if an existing admin still uses the old public default password.
+ * Does not lock anyone out, but makes the risk visible in boot logs.
+ */
+const warnIfDefaultAdminPassword = () => {
 	try {
-		const row = db.prepare('SELECT COUNT(*) as count FROM users').get();
-		if (row.count === 0) {
-			console.log('No users found in SQLite DB. Creating default admin user...');
-			const username = 'admin';
-			const rawPassword = 'caddyrocks';
-			const hashedPassword = bcrypt.hashSync(rawPassword, 10);
-			const now = new Date().toISOString();
-			db.prepare(`INSERT INTO users (username, email, password, role, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-				.run(username, null, hashedPassword, 'admin', 1, now, now);
-			console.log('Default admin user created successfully.');
-			console.log(`Username: ${username}`);
-			console.log('Password: [hidden]');
-			console.log('Please change this password immediately after first login.');
+		const rows = db.prepare(`SELECT username, password FROM users WHERE role = 'admin'`).all();
+		for (const row of rows) {
+			if (row.password && bcrypt.compareSync('caddyrocks', row.password)) {
+				console.error(
+					`[SECURITY] Admin "${row.username}" still uses the old public default password. Change it now.`
+				);
+			}
 		}
 	} catch (error) {
-		console.error('Error creating default admin user in SQLite:', error.message);
-		// Don't exit the process here, just log the error
+		console.error('Failed to check admin password strength:', error.message);
 	}
+};
+
+/**
+ * Check if any users exist in the database.
+ * If not, create the bootstrap admin (random password in dev, ADMIN_PASSWORD in prod).
+ */
+const createDefaultAdminIfNeeded = () => {
+	const row = db.prepare('SELECT COUNT(*) as count FROM users').get();
+	if (row.count === 0) {
+		const { password: rawPassword, generated } = resolveBootstrapAdminPassword();
+		console.log('No users found in SQLite DB. Creating bootstrap admin user...');
+		const username = 'admin';
+		const hashedPassword = bcrypt.hashSync(rawPassword, 10);
+		const now = new Date().toISOString();
+		db.prepare(`INSERT INTO users (username, email, password, role, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+			.run(username, null, hashedPassword, 'admin', 1, now, now);
+		console.log('Bootstrap admin user created successfully.');
+		console.log(`Username: ${username}`);
+		if (generated) {
+			console.log(`Generated admin password (shown once — change it after login): ${rawPassword}`);
+		} else {
+			console.log('Password: [from ADMIN_PASSWORD]');
+		}
+	}
+	warnIfDefaultAdminPassword();
 };
 
 module.exports = {
