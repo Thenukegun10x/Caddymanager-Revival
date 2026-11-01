@@ -10,6 +10,7 @@ const { connectToMongo, disconnectFromMongo } = require('./services/mongoService
 const { connectToSQLite } = require('./services/sqliteService');
 const pingService = require('./services/pingService');
 const routes = require('./router');
+const { sendError, scrubErrorResponses } = require('./utils/httpError');
 
 // Fail fast if JWT_SECRET is missing, short, or a known placeholder (C1)
 try {
@@ -53,6 +54,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(helmet({ contentSecurityPolicy: false, hsts: { maxAge: 31536000, includeSubDomains: true } }));
+// Never echo internal error detail from production responses (H6)
+app.use(scrubErrorResponses);
 // Rate limiting — generous in test, strict in prod (AGENTS.md §7 H7)
 const isTest = process.env.NODE_ENV === 'test';
 const loginLimiter = rateLimit({
@@ -89,11 +92,12 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 
-// Swagger API Documentation UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, { explorer: true }));
+// Swagger API Documentation UI — admin only (H8): the spec enumerates every route
+const { protect, authorize } = require('./middleware/authMiddleware');
+app.use('/api-docs', protect, authorize('admin'), swaggerUi.serve, swaggerUi.setup(swaggerSpecs, { explorer: true }));
 
-// Expose the Swagger JSON schema for frontend consumption
-app.get('/api/v1/docs/swagger.json', (req, res) => {
+// Expose the Swagger JSON schema for frontend consumption (admin only)
+app.get('/api/v1/docs/swagger.json', protect, authorize('admin'), (req, res) => {
   res.json(swaggerSpecs);
 });
 
@@ -111,14 +115,11 @@ try {
   setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000);
 } catch {}
 
-// Global error handler
+// Global error handler — generic message + correlation id (H6)
 app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
+  const status = err.status || err.statusCode || 500;
+  const message = status < 500 && err.message ? err.message : 'Internal Server Error';
+  sendError(req, res, status, message, err);
 });
 
 // Catch 404 and forward to error handler

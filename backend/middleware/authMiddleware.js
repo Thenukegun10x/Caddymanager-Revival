@@ -122,17 +122,18 @@ exports.protect = async (req, res, next) => {
       
       next();
     } catch (error) {
+      // Do not reveal why a token failed (expired vs bad signature vs version)
+      console.warn(`[auth] token rejected: ${error.message}`);
       return res.status(401).json({
         success: false,
-        message: 'Not authorized to access this route',
-        error: error.message
+        message: 'Not authorized to access this route'
       });
     }
   } catch (error) {
+    console.error('[auth] middleware error:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Server error in authentication',
-      error: error.message
+      message: 'Server error in authentication'
     });
   }
 };
