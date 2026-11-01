@@ -44,6 +44,7 @@ const createTablesIfNeeded = () => {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
 		key TEXT UNIQUE NOT NULL,
+		keyPrefix TEXT,
 		userId INTEGER NOT NULL,
 		permissions TEXT NOT NULL,
 		lastUsed TEXT,
@@ -52,6 +53,12 @@ const createTablesIfNeeded = () => {
 		isActive INTEGER NOT NULL DEFAULT 1,
 		FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE
 	)`).run();
+
+	// Migration: add keyPrefix for databases created before API keys were hashed (H1)
+	const apiKeyColumns = db.prepare('PRAGMA table_info(api_keys)').all().map(c => c.name);
+	if (!apiKeyColumns.includes('keyPrefix')) {
+		db.prepare('ALTER TABLE api_keys ADD COLUMN keyPrefix TEXT').run();
+	}
 
 	// Caddy Servers table (mirrors caddyServersSQLiteModel.ensureTable)
 	db.prepare(`CREATE TABLE IF NOT EXISTS caddy_servers (

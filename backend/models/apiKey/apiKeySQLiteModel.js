@@ -21,6 +21,7 @@ function ensureTable() {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
 		key TEXT UNIQUE NOT NULL,
+		keyPrefix TEXT,
 		userId INTEGER NOT NULL,
 		permissions TEXT NOT NULL,
 		lastUsed TEXT,
@@ -28,6 +29,15 @@ function ensureTable() {
 		createdAt TEXT NOT NULL,
 		isActive INTEGER NOT NULL DEFAULT 1
 	)`).run();
+	const columns = db.prepare('PRAGMA table_info(api_keys)').all().map(c => c.name);
+	if (!columns.includes('keyPrefix')) {
+		db.prepare('ALTER TABLE api_keys ADD COLUMN keyPrefix TEXT').run();
+	}
+}
+
+// Keys are stored as sha256(key) so a DB leak does not yield usable credentials (H1).
+function hashKey(key) {
+	return crypto.createHash('sha256').update(String(key)).digest('hex');
 }
 
 // Don't call ensureTable() immediately - let the service handle table creation
@@ -43,6 +53,7 @@ const ApiKeySQLiteModel = {
 		if (!db) throw new Error('Database not initialized');
 		
 		const key = this.generateKey();
+		const keyPrefix = key.slice(0, 8);
 		const now = new Date();
 		const expiresAt = expiration ? new Date(expiration) : (() => {
 			const d = new Date();
@@ -50,24 +61,26 @@ const ApiKeySQLiteModel = {
 			return d;
 		})();
 		const perms = { read: true, write: false, delete: false, ...permissions };
-		const stmt = db.prepare(`INSERT INTO api_keys (name, key, userId, permissions, expiresAt, createdAt, isActive) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+		const stmt = db.prepare(`INSERT INTO api_keys (name, key, keyPrefix, userId, permissions, expiresAt, createdAt, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
 		const info = stmt.run(
 			name,
-			key,
+			hashKey(key),
+			keyPrefix,
 			userId,
 			serializePermissions(perms),
 			expiresAt.toISOString(),
 			now.toISOString(),
 			1
 		);
-		return { id: info.lastInsertRowid, name, key, userId, permissions: perms, expiresAt, createdAt: now, isActive: true };
+		// key is returned once (plaintext) so the user can copy it; only its hash is stored.
+		return { id: info.lastInsertRowid, _id: String(info.lastInsertRowid), name, key, keyPrefix, plaintextKey: key, userId, permissions: perms, expiresAt, createdAt: now, isActive: true };
 	},
 
 	validateApiKey(key) {
 		const db = getDB();
 		if (!db) throw new Error('Database not initialized');
 		
-		const row = db.prepare('SELECT * FROM api_keys WHERE key = ? AND isActive = 1').get(key);
+		const row = db.prepare('SELECT * FROM api_keys WHERE key = ? AND isActive = 1').get(hashKey(key));
 		if (!row) return null;
 		if (row.expiresAt && new Date(row.expiresAt) < new Date()) return null;
 		// Update lastUsed
@@ -86,7 +99,7 @@ const ApiKeySQLiteModel = {
 		const db = getDB();
 		if (!db) throw new Error('Database not initialized');
 		
-		let sql = 'SELECT id, name, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys';
+		let sql = 'SELECT id, name, keyPrefix, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys';
 		const params = [];
 		
 		if (Object.keys(query).length > 0) {
@@ -123,7 +136,7 @@ const ApiKeySQLiteModel = {
 		const db = getDB();
 		if (!db) throw new Error('Database not initialized');
 		
-		const rows = db.prepare('SELECT id, name, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys WHERE userId = ? ORDER BY createdAt DESC').all(userId);
+		const rows = db.prepare('SELECT id, name, keyPrefix, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys WHERE userId = ? ORDER BY createdAt DESC').all(userId);
 		return rows.map(row => ({
 			...row,
 			_id: row.id, // For MongoDB compatibility
@@ -139,7 +152,7 @@ const ApiKeySQLiteModel = {
 		const db = getDB();
 		if (!db) throw new Error('Database not initialized');
 		
-		const row = db.prepare('SELECT id, name, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys WHERE id = ?').get(id);
+		const row = db.prepare('SELECT id, name, keyPrefix, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys WHERE id = ?').get(id);
 		if (!row) return null;
 		return {
 			...row,
@@ -157,7 +170,7 @@ const ApiKeySQLiteModel = {
 		const db = getDB();
 		if (!db) throw new Error('Database not initialized');
 		
-		let sql = 'SELECT id, name, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys';
+		let sql = 'SELECT id, name, keyPrefix, userId, permissions, lastUsed, expiresAt, createdAt, isActive FROM api_keys';
 		const params = [];
 		const conditions = [];
 
@@ -273,7 +286,7 @@ const ApiKeySQLiteModel = {
 		
 		const sql = `
 			SELECT 
-				ak.id, ak.name, ak.userId, ak.permissions, ak.lastUsed, ak.expiresAt, ak.createdAt, ak.isActive,
+				ak.id, ak.name, ak.keyPrefix, ak.userId, ak.permissions, ak.lastUsed, ak.expiresAt, ak.createdAt, ak.isActive,
 				u.username, u.email
 			FROM api_keys ak
 			LEFT JOIN users u ON ak.userId = u.id
