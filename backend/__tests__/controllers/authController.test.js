@@ -41,7 +41,7 @@ describe('AuthController', () => {
     });
 
     // Generate tokens
-    const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_for_development';
+    const JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-for-ci-only-not-for-prod';
     authToken = jwt.sign({ id: testUser.id || testUser._id }, JWT_SECRET, { expiresIn: '24h' });
     adminToken = jwt.sign({ id: adminUser.id || adminUser._id }, JWT_SECRET, { expiresIn: '24h' });
   });
