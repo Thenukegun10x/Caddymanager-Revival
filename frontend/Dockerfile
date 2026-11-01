@@ -35,6 +35,8 @@ COPY --from=build /var/www/Caddyfile /etc/caddy/Caddyfile
 
 # Run as non-root (SAST dockerfile.security.missing-user)
 RUN addgroup -S caddy && adduser -S -G caddy caddy || true
+# Allow the non-root user to bind :80/:443 without running as root
+RUN apk add --no-cache libcap && setcap cap_net_bind_service=+ep /usr/bin/caddy
 USER caddy
 
 EXPOSE 80

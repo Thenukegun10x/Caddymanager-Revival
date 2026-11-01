@@ -26,7 +26,18 @@ COPY . .
 RUN node scripts/generateBuildInfo.js && ls -la build-info.* 2>/dev/null || echo "no build-info"
 # Verify better-sqlite3 loads (works for 12.x via bindings and 13.x via prebuilds)
 RUN ls -lh node_modules/better-sqlite3/build/Release/ 2>&1 | head -n 20; ls -lh node_modules/better-sqlite3/prebuilds/ 2>&1 | head -n 20; node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('smoke:',db.prepare('select 1 as v').get())" || echo "smoke failed"
-RUN npm cache clean --force
+
+# H3: production-only dependency tree. Native addons are already built above.
+FROM builder AS runtime-deps
+RUN npm prune --omit=dev && npm cache clean --force
+
+# Keep a stage with dev dependencies for the isolated test runner.
+# libcurl4 is required by the mongodb-memory-server binary (Mongo parity tests).
+FROM builder AS test
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libcurl4 && \
+    rm -rf /var/lib/apt/lists/*
+CMD ["/usr/src/node-app/node_modules/.bin/jest", "--runInBand"]
 
 # Runtime — no build tools, non-root
 FROM node:20-bookworm-slim
@@ -48,7 +59,7 @@ ENV GIT_BRANCH=$GIT_BRANCH
 ENV BUILD_DATE=$BUILD_DATE
 ENV NODE_ENV=production
 
-COPY --from=builder /usr/src/node-app/node_modules ./node_modules
+COPY --from=runtime-deps /usr/src/node-app/node_modules ./node_modules
 COPY --from=builder /usr/src/node-app/package*.json ./
 COPY --chown=node:node . .
 # Overwrite with builder's fresh build-info (with build args)

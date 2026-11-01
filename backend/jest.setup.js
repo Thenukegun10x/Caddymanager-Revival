@@ -15,6 +15,11 @@ if (process.env.DB_ENGINE === 'sqlite') {
   sqliteService.connectToSQLite();
 }
 
+// MongoDB memory server needs longer than Jest's 5s default to boot (C5 parity tests)
+if (process.env.DB_ENGINE === 'mongodb') {
+  jest.setTimeout(60000);
+}
+
 // Mock console methods to reduce noise in tests
 if (process.env.JEST_SILENT !== 'false') {
   global.console = {

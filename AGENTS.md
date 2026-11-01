@@ -138,6 +138,7 @@ AUDIT_LOG_RETENTION_DAYS=90
 METRICS_HISTORY_MAX=1000
 JWT_SECRET= # REQUIRED, 32+ hex, no fallback (fix for middleware/authMiddleware.js:6)
 JWT_EXPIRATION=24h # code also reads JWT_EXPIRES_IN — support both
+ALLOW_BEARER_TOKEN=false # true only for CLI clients that need the token in the login body
 ADMIN_PASSWORD= # REQUIRED on first boot when users table is empty (12+ chars)
 ALLOW_PRIVATE_IPS=false # true only for local/test stacks that manage private Caddy targets
 ```
@@ -219,7 +220,10 @@ To add servers in UI: `Servers -> Add Server -> API URL=http://caddy-server-1 (c
 ## 7. Agent Rules — Do Not Reintroduce PLAN.md:4 Bugs
 
 - **JWT:** Never add `|| 'hardcoded'`. `backend/middleware/authMiddleware.js:6` must `throw if !JWT_SECRET`, `jwt.verify(..., {algorithms:['HS256']})`. Support `JWT_EXPIRATION` + `JWT_EXPIRES_IN`.
-- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeUrl` — deny `10/8,172.16/12,192.168/16,169.254/16,127/8,::1`, enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`.
+- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeApiUrl/assertSafeServerConfig` — deny RFC1918, CGNAT, loopback, link-local, metadata, ULA `fc00::/7`, `::`, `::1`; enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`. Use `axiosSafeOpts` (CIDR checks + `safeLookup` + literal-IP `createConnection` guard); never re-introduce string-prefix checks.
+- **API keys:** only `sha256(key)` at rest with an 8-char `keyPrefix`; plaintext is returned once at creation. `middleware/apiKeyPermissions.js` maps GET/HEAD→read, DELETE→delete, everything else→write, and blocks keys from auth/key-management routes.
+- **Errors:** respond with a generic message + `errorId` (`utils/httpError.js`); never return `error.message`/stacks in production. `app.js` installs `scrubErrorResponses` as defense in depth.
+- **Passwords/emails:** use the shared `utils/validate.js` schemas (12-128 chars, 3 character classes, common-password denylist, 254-char linear-time email). Never add a backtracking email regex.
 - **SQL:** Never interpolate `` `${key} = ?` ``. Whitelist `ALLOWED` in `repositories/*` and `models/*SQLiteModel.js:111`. Test column injection.
 - **RBAC:** `router/caddyRoutes.js:8` must have `protect` + ownership check `createdBy===req.user.id || role===admin`. No handler without it.
 - **Metrics:** `router/metricsRoutes.js:31` / `buildInfoRoutes.js` require `protect, authorize('admin')` or `127.0.0.1` allowlist.
