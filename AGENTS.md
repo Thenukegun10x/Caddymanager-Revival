@@ -76,7 +76,7 @@ docker compose -f docker-compose.build.yml -f docker-compose.test.yml down -v
 
 | File | Purpose | Images | Ports | Networks | When to use |
 |------|---------|--------|-------|----------|-------------|
-| `docker-compose.yml` | prod-like pull | `ghcr.io/caddymanager/*:latest` | frontend `80:80`, mongodb `27017` optional | `caddymanager` | demo, no code change |
+| `docker-compose.yml` | prod-like pull | `ghcr.io/caddymanager/*:latest` | frontend `80:80`; MongoDB only via `docker-compose.mongodb.yml` (loopback) | `caddymanager` | demo, no code change |
 | `docker-compose.build.yml` | local build | `build: ./backend, ./frontend` | same | `caddymanager` | dev, CI build parity |
 | `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.10-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
 
@@ -125,7 +125,9 @@ networks:
 PORT=3000
 DB_ENGINE=sqlite # sqlite | mongodb
 SQLITE_DB_PATH=./caddymanager.sqlite # or :memory: for jest
-MONGODB_URI=mongodb://mongoadmin:...@mongodb:27017/caddymanager?authSource=admin
+MONGODB_URI= # full URI from your secrets manager; no credentials in compose
+MONGO_USERNAME=mongoadmin # only for docker-compose.mongodb.yml
+MONGO_PASSWORD= # REQUIRED by that overlay (12+ chars, openssl rand -hex 24)
 CORS_ORIGIN=http://localhost:5173,http://localhost:80
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
@@ -160,6 +162,15 @@ npm ci
 DB_ENGINE=sqlite npm test                 # jest.setup.js uses :memory:
 bash test-all-engines.sh                 # sqlite then mongo (needs mongod or uses mongodb-memory-server)
 npm run test:coverage
+```
+
+### Dockerised tests (host without Node 20)
+The production image is pruned of dev deps (H3). Build the test target first:
+```bash
+docker build --target test -t caddymanager/caddymanager-backend:test ./backend
+docker run --rm -e NODE_PATH=/usr/src/node-app/node_modules \
+  -v "$PWD/backend:/src" -w /src caddymanager/caddymanager-backend:test \
+  /usr/src/node-app/node_modules/.bin/jest --runInBand --forceExit
 ```
 
 ### Docker smoke

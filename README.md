@@ -47,23 +47,6 @@ Below is the updated `docker-compose.yml` for running both backend and frontend.
 
 ```yaml
 services:
-  # MongoDB database for persistent storage (optional - SQLite is used by default)
-  mongodb:
-    image: mongo:8.0
-    container_name: caddymanager-mongodb
-    restart: unless-stopped
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=mongoadmin
-      - MONGO_INITDB_ROOT_PASSWORD=someSecretPassword  # Change for production!
-    ports:
-      - "27017:27017"  # Expose for local dev, remove for production
-    volumes:
-      - mongodb_data:/data/db
-    networks:
-      - caddymanager
-    profiles:
-      - mongodb  # Use 'docker-compose --profile mongodb up' to include MongoDB
-
   # Backend API server
   backend:
     image: caddymanager/caddymanager-backend:latest
@@ -75,9 +58,9 @@ services:
       - DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
       # SQLite Configuration (used when DB_ENGINE=sqlite)
       - SQLITE_DB_PATH=/app/data/caddymanager.sqlite
-      # MongoDB Configuration (used when DB_ENGINE=mongodb)
-      - MONGODB_URI=mongodb://mongoadmin:someSecretPassword@mongodb:27017/caddymanager?authSource=admin
-      - CORS_ORIGIN=http://localhost:80
+      # MongoDB Configuration (only when DB_ENGINE=mongodb) — set the full URI in .env
+      - MONGODB_URI=${MONGODB_URI:-}
+      - CORS_ORIGIN=http://localhost,http://localhost:80
       - LOG_LEVEL=debug
       - CADDY_SANDBOX_URL=http://localhost:2019
       - PING_INTERVAL=30000
@@ -85,8 +68,11 @@ services:
       - AUDIT_LOG_MAX_SIZE_MB=100
       - AUDIT_LOG_RETENTION_DAYS=90
       - METRICS_HISTORY_MAX=1000  # Optional: max number of in-memory metric history snapshots to keep
-      - JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+      # REQUIRED in .env: openssl rand -hex 32. Compose fails closed if unset.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
       - JWT_EXPIRATION=24h
+      # REQUIRED on first boot when the users table is empty (12+ chars)
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     # Backend is now only accessible through frontend proxy
     volumes:
       - sqlite_data:/app/data  # SQLite database storage
@@ -114,13 +100,13 @@ networks:
     driver: bridge
 
 volumes:
-  mongodb_data:  # Only used when MongoDB profile is active
   sqlite_data:   # SQLite database storage
 
 # Notes:
 # - SQLite is the default database engine - no additional setup required!
-# - To use MongoDB instead, set DB_ENGINE=mongodb and start with: docker-compose --profile mongodb up
-# - For production, use strong passwords and consider secrets management.
+# - To use the bundled MongoDB, set DB_ENGINE, MONGODB_URI and MONGO_PASSWORD in
+#   .env and run: docker compose -f docker-compose.yml -f docker-compose.mongodb.yml up -d
+# - For production, use strong passwords and a secrets manager.
 # - The backend uses SQLite by default, storing data in a persistent volume.
 # - The frontend proxies all /api/* requests to the backend service.
 # - Backend is not directly exposed - all API access goes through the frontend proxy.
@@ -152,7 +138,7 @@ DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
 # SQLite Configuration (used when DB_ENGINE=sqlite)
 SQLITE_DB_PATH=./caddymanager.sqlite
 # MongoDB Configuration (used when DB_ENGINE=mongodb)
-MONGODB_URI=mongodb://mongoadmin:someSecretPassword@localhost:27017/caddymanager?authSource=admin
+MONGODB_URI=mongodb://<user>:<password>@localhost:27017/caddymanager?authSource=admin
 CORS_ORIGIN=http://localhost:5173
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
@@ -160,8 +146,11 @@ PING_INTERVAL=30000
 PING_TIMEOUT=2000
 AUDIT_LOG_MAX_SIZE_MB=100
 AUDIT_LOG_RETENTION_DAYS=90
-JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+# REQUIRED: 32+ chars (openssl rand -hex 32). The backend refuses to boot otherwise.
+JWT_SECRET=
 JWT_EXPIRATION=24h
+# REQUIRED on first boot with an empty users table (12+ chars)
+ADMIN_PASSWORD=
 ```
 - `PORT`: Port for the backend server.
 - `DB_ENGINE`: Database engine to use (`sqlite` or `mongodb`). Defaults to `sqlite`.

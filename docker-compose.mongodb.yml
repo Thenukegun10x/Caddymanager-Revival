@@ -1,0 +1,30 @@
+# Optional bundled MongoDB for the prod-like stack.
+#
+#   # .env
+#   DB_ENGINE=mongodb
+#   MONGO_PASSWORD=<openssl rand -hex 24>
+#   MONGO_USERNAME=mongoadmin
+#   MONGODB_URI=mongodb://<MONGO_USERNAME>:<MONGO_PASSWORD>@mongodb:27017/caddymanager?authSource=admin
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mongodb.yml up -d
+#
+# The port is published on loopback only. For a real deployment prefer an
+# external managed MongoDB and omit this file entirely.
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: caddymanager-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USERNAME:-mongoadmin}"
+      # Fail closed: the overlay refuses to start without an explicit password.
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}"
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - caddymanager
+
+volumes:
+  mongodb_data:

@@ -12,8 +12,8 @@ services:
       - DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
       # SQLite Configuration (used when DB_ENGINE=sqlite)
       - SQLITE_DB_PATH=/app/data/caddymanager.sqlite
-      # MongoDB Configuration (used when DB_ENGINE=mongodb)
-      - MONGODB_URI=mongodb://mongoadmin:someSecretPassword@mongodb:27017/caddymanager?authSource=admin
+      # MongoDB Configuration (only used when DB_ENGINE=mongodb)
+      - MONGODB_URI=${MONGODB_URI:-}
       - CORS_ORIGIN=http://localhost,http://localhost:80
       - LOG_LEVEL=debug
       - CADDY_SANDBOX_URL=http://localhost:2019
