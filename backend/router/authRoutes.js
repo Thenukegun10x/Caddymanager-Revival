@@ -1,5 +1,11 @@
 const express = require('express');
 const router = express.Router();
+
+// Auth responses carry credentials/user data — never cache them (M12)
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { rejectApiKey } = require('../middleware/apiKeyPermissions');

@@ -33,9 +33,9 @@ exports.protect = async (req, res, next) => {
       isApiKey = true;
     }
 
-    // Also check httpOnly cookie (Set D, mitigates XSS)
-    if (!token && req.cookies && req.cookies.auth_token) {
-      token = req.cookies.auth_token;
+    // Also check httpOnly cookie (accept the hardened __Host- form and legacy name)
+    if (!token && req.cookies) {
+      token = req.cookies['__Host-auth_token'] || req.cookies.auth_token;
     }
     
     // Check if token exists

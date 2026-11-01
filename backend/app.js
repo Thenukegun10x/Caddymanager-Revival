@@ -60,7 +60,7 @@ app.use(scrubErrorResponses);
 const isTest = process.env.NODE_ENV === 'test';
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many login attempts, try later' },
@@ -86,7 +86,7 @@ app.use('/api/v1/caddy/test-connection', testConnLimiter);
 app.use('/api/v1/', apiLimiter);
 app.use(express.json({ limit: '200kb' }));
 app.use(express.text({ limit: '512kb', type: 'text/plain' }));
-app.use(express.urlencoded({ extended: true, limit: '200kb' }));
+// No express.urlencoded: the API is JSON/text only (M1, smaller parser surface)
 // Only verbose logging in development
 if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));

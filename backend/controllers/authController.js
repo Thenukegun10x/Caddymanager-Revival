@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const userRepository = require('../repositories/userRepository');
 const auditService = require('../services/auditService');
 const { getJwtSecret } = require('../utils/jwtSecret');
@@ -7,6 +8,29 @@ const { getJwtSecret } = require('../utils/jwtSecret');
 // JWT_EXPIRES_IN and JWT_EXPIRATION
 getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRATION || '24h';
+
+// Constant-cost dummy hash so a missing user and a wrong password take the same
+// time (M3 — username enumeration by timing).
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
+
+/**
+ * Cookie policy (M1):
+ * - HTTPS production: __Host- prefix, Secure, SameSite=Strict, Path=/
+ * - plain-HTTP LAN/dev: regular name with Lax, otherwise browsers drop the cookie
+ */
+function authCookie(req) {
+  const isSecure = process.env.NODE_ENV === 'production' &&
+    (req.secure || req.headers['x-forwarded-proto'] === 'https');
+  return {
+    name: isSecure ? '__Host-auth_token' : 'auth_token',
+    options: {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? 'strict' : 'lax',
+      path: '/',
+    },
+  };
+}
 
 // Generate JWT token — enforce HS256, include tokenVersion for rotation
 const generateToken = (userId, tokenVersion = 0) => {
@@ -39,6 +63,9 @@ exports.login = async (req, res) => {
         userAgent: req.headers['user-agent']
       });
       
+      // M3: burn the same bcrypt cost as a real comparison before failing
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+
       return res.status(401).json({ 
         success: false, 
         message: 'Invalid credentials' 
@@ -75,15 +102,9 @@ exports.login = async (req, res) => {
     // Generate token with current tokenVersion
     const token = generateToken(user.id || user._id, user.tokenVersion || 0);
 
-    // Set httpOnly cookie (Secure only on https, else http LAN 192.168... would not send)
-    const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: isSecure,
-      sameSite: isSecure ? 'strict' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000
-    });
+    // Set httpOnly cookie. M1: __Host- + Strict on HTTPS; Lax only for plain-HTTP LAN.
+    const cookie = authCookie(req);
+    res.cookie(cookie.name, token, { ...cookie.options, maxAge: 24 * 60 * 60 * 1000 });
 
     // Log successful login
     await auditService.logAction({
@@ -125,13 +146,12 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
-  res.clearCookie('auth_token', {
-    httpOnly: true,
-    secure: isSecure,
-    sameSite: isSecure ? 'strict' : 'lax',
-    path: '/'
-  });
+  const cookie = authCookie(req);
+  // Clear both the current and the legacy cookie name so an upgrade cannot leave
+  // a valid session cookie behind.
+  res.clearCookie(cookie.name, cookie.options);
+  res.clearCookie('auth_token', cookie.options);
+  res.clearCookie('__Host-auth_token', { ...cookie.options, secure: true });
   res.json({ success: true, message: 'Logged out' });
 };
 
