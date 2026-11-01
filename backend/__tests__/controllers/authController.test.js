@@ -57,9 +57,29 @@ describe('AuthController', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.token).toBeDefined();
+      // H7: SPA path is cookie-only; no JWT in the JSON body by default
+      expect(response.body.token).toBeUndefined();
+      const cookies = response.headers['set-cookie'] || [];
+      expect(cookies.join(';')).toMatch(/auth_token=/);
+      expect(cookies.join(';')).toMatch(/HttpOnly/i);
       expect(response.body.user.username).toBe('testuser');
       expect(response.body.user.password).toBeUndefined();
+    });
+
+    it('returns a bearer token only when explicitly enabled', async () => {
+      const original = process.env.ALLOW_BEARER_TOKEN;
+      process.env.ALLOW_BEARER_TOKEN = 'true';
+      try {
+        const response = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ username: 'testuser', password: 'password123' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.token).toBeDefined();
+      } finally {
+        if (original === undefined) delete process.env.ALLOW_BEARER_TOKEN;
+        else process.env.ALLOW_BEARER_TOKEN = original;
+      }
     });
 
     it('should fail login with invalid credentials', async () => {

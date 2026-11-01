@@ -99,10 +99,10 @@ exports.login = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // Send response (still return token for backwards compat, but frontend should use cookie)
-    res.status(200).json({
+    // Send response. H7: the SPA authenticates via the httpOnly cookie only;
+    // a bearer token in the body is opt-in for CLI/automation use.
+    const body = {
       success: true,
-      token,
       user: {
         id: user.id || user._id,
         username: user.username,
@@ -110,7 +110,11 @@ exports.login = async (req, res) => {
         role: user.role,
         lastLogin: updatedUser ? updatedUser.lastLogin : new Date()
       }
-    });
+    };
+    if (process.env.ALLOW_BEARER_TOKEN === 'true') {
+      body.token = token;
+    }
+    res.status(200).json(body);
   } catch (error) {
     res.status(500).json({
       success: false,
