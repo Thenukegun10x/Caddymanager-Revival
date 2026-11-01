@@ -344,6 +344,9 @@ router.get('/stats', authorize('admin'), auditLogController.getAuditStats);
  */
 router.get('/filters', authorize('admin'), auditLogController.getFilterOptions);
 
+// Verify the append-only SHA-256 audit chain (admin only).
+router.get('/integrity', authorize('admin'), auditLogController.verifyIntegrity);
+
 /**
  * @swagger
  * /api/v1/audit-logs/resource/{resourceType}/{resourceId}:

@@ -40,11 +40,27 @@ const auditLogSchema = new mongoose.Schema({
   timestamp: {
     type: Date,
     default: Date.now
+  },
+  chainSequence: {
+    type: Number,
+    min: 1
+  },
+  previousHash: {
+    type: String,
+    match: /^[a-f0-9]{64}$/
+  },
+  entryHash: {
+    type: String,
+    match: /^[a-f0-9]{64}$/
   }
 }, {
   // Enable automatic timestamps
   timestamps: true
 });
+
+// At most one writer may claim each sequence number. Concurrent instances retry
+// on duplicate-key conflict and append after the winning writer.
+auditLogSchema.index({ chainSequence: 1 }, { unique: true, sparse: true });
 
 // TTL index for retention (Set D)
 const retentionDays = parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '90', 10);

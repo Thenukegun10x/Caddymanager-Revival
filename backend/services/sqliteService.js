@@ -11,6 +11,9 @@ let db;
 
 const connectToSQLite = () => {
 	try {
+		// Jest setup, app imports and bootstrap helpers may all call this. Reuse
+		// the live connection (especially :memory:, where reopening loses data).
+		if (db && db.open) return;
 		db = new Database(sqlitePath);
 		console.log(`Connected to SQLite at ${sqlitePath}`);
 		// Bootstrap tables and admin user
@@ -120,8 +123,15 @@ const createTablesIfNeeded = () => {
 		userAgent TEXT,
 		timestamp TEXT NOT NULL,
 		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
+		updatedAt TEXT NOT NULL,
+		chainSequence INTEGER,
+		previousHash TEXT,
+		entryHash TEXT
 	)`).run();
+	for (const [column, type] of [['chainSequence', 'INTEGER'], ['previousHash', 'TEXT'], ['entryHash', 'TEXT']]) {
+		try { db.prepare(`ALTER TABLE audit_logs ADD COLUMN ${column} ${type}`).run(); } catch (_) {}
+	}
+	db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_chain_sequence ON audit_logs(chainSequence) WHERE chainSequence IS NOT NULL').run();
 
 	// Auto-migrate: backfill caddy_servers.createdBy NULL -> admin (idempotent)
 	try {

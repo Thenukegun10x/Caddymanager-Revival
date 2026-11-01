@@ -140,6 +140,10 @@ const auditService = {
     return stats.byResourceType || [];
   },
 
+  async verifyIntegrity() {
+    return auditLogRepository.verifyChain();
+  },
+
   /**
    * Get statistics about users in the audit logs
    */

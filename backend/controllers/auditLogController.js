@@ -1,4 +1,5 @@
 const auditService = require('../services/auditService');
+const { sendError } = require('../utils/httpError');
 
 /**
  * Audit Log Controller - Handles requests related to audit logs
@@ -264,6 +265,15 @@ const auditLogController = {
         message: 'Error retrieving filter options',
         error: error.message
       });
+    }
+  },
+
+  verifyIntegrity: async (req, res) => {
+    try {
+      const integrity = await auditService.verifyIntegrity();
+      res.status(200).json({ success: true, data: integrity });
+    } catch (error) {
+      return sendError(req, res, 500, 'Unable to verify audit log integrity', error);
     }
   }
 };
