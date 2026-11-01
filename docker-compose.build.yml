@@ -21,8 +21,11 @@ services:
       - PING_TIMEOUT=2000
       - AUDIT_LOG_MAX_SIZE_MB=100
       - AUDIT_LOG_RETENTION_DAYS=90
-      - JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+      # Required: set JWT_SECRET in .env (openssl rand -hex 32). Fails closed if unset.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
       - JWT_EXPIRATION=24h
+      # Required only on first boot (empty users table); app fails closed otherwise
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     volumes:
       - sqlite_data:/app/data
     networks:

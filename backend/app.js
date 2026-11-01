@@ -11,9 +11,11 @@ const { connectToSQLite } = require('./services/sqliteService');
 const pingService = require('./services/pingService');
 const routes = require('./router');
 
-// Fail fast if JWT_SECRET not set in non-test (covers AGENTS.md C1)
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
-  console.error('FATAL: JWT_SECRET must be set — refusing to boot with insecure default');
+// Fail fast if JWT_SECRET is missing, short, or a known placeholder (C1)
+try {
+  require('./utils/jwtSecret').getJwtSecret();
+} catch (error) {
+  console.error(`FATAL: ${error.message}`);
   process.exit(1);
 }
 

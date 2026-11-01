@@ -1,19 +1,11 @@
 const jwt = require('jsonwebtoken');
 const userRepository = require('../repositories/userRepository');
 const auditService = require('../services/auditService');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
-// Environment variables — fail fast if JWT_SECRET not set (except test); support both JWT_EXPIRES_IN and JWT_EXPIRATION
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'test') return 'test-jwt-secret-for-ci-only-not-for-prod';
-    throw new Error('JWT_SECRET must be set — refusing to sign with insecure default');
-  }
-  return secret;
-}
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
-  throw new Error('JWT_SECRET environment variable is required');
-}
+// Fail fast if JWT_SECRET is missing/short/placeholder (C1); support both
+// JWT_EXPIRES_IN and JWT_EXPIRATION
+getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRATION || '24h';
 
 // Generate JWT token — enforce HS256, include tokenVersion for rotation
