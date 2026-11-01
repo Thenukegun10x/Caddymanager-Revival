@@ -14,8 +14,11 @@ services:
     environment:
       # Fail fast if not set — prevents fallback to hardcoded secret (PLAN.md C1)
       JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env.test.local}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env.test.local}"
       CORS_ORIGIN: "http://localhost:18080"
       CADDY_SANDBOX_URL: "http://caddy-sandbox:2020"
+      # Isolated test stack intentionally manages local Caddy containers.
+      ALLOW_PRIVATE_IPS: "true"
 
   # ensure backend can resolve caddy-server-* via external network created by spin scripts
 networks:

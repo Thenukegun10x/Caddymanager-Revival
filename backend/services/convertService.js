@@ -2,7 +2,7 @@ const axios = require('axios');
 const caddyService = require('./caddyService');
 const auditService = require('./auditService');
 require('dotenv').config();
-const { assertSafeApiUrl, assertSafePort, axiosSafeOpts } = require('../utils/ssrf');
+const { assertSafeApiUrl, assertSafePort, axiosSafeOpts, axiosSandboxOpts } = require('../utils/ssrf');
 
 /**
  * Conversion Service - Handles conversion between Caddyfile and JSON formats
@@ -17,6 +17,7 @@ const convertService = {
   async caddyfileToJson(caddyfile, serverId = null) {
     try {
       let serverUrl;
+      let requestOpts = axiosSafeOpts;
       
       if (serverId) {
         const server = await caddyService.getServerById(serverId);
@@ -28,13 +29,16 @@ const convertService = {
         serverUrl = `${server.apiUrl}:${server.apiPort}`;
       } else {
         serverUrl = process.env.CADDY_SANDBOX_URL || 'http://localhost:2019';
-        // Validate sandbox URL is safe (allow localhost for testing, but block private override via env)
+        // Operator-controlled env URL: allow local sandbox targets, but still
+        // require http(s) and forbid credentials.
         try {
           const u = new URL(serverUrl);
           if (!['http:', 'https:'].includes(u.protocol)) throw new Error('invalid');
+          if (u.username || u.password) throw new Error('invalid');
         } catch (_) {
           throw new Error(`Invalid CADDY_SANDBOX_URL ${serverUrl}`);
         }
+        requestOpts = axiosSandboxOpts;
       }
       
       // Ensure caddyfile is a string
@@ -48,7 +52,7 @@ const convertService = {
         {
           params: { pretty: true },
           headers: { 'Content-Type': 'text/caddyfile' },
-          ...axiosSafeOpts,
+          ...requestOpts,
           maxBodyLength: 512 * 1024,
           maxContentLength: 1_000_000,
           timeout: 10000
