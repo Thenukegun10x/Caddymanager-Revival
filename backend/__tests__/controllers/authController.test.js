@@ -139,6 +139,30 @@ describe('AuthController', () => {
       expect(response.body.success).toBe(false);
       expect(response.body.message).toBe('Username already exists');
     });
+
+    it('should reject a catastrophic-backtracking email quickly (H5)', async () => {
+      const evil = 'a.a!'.repeat(12); // 48 chars, previously minutes of backtracking
+      const started = Date.now();
+      const response = await request(app)
+        .put('/api/v1/auth/update-profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ email: evil });
+      const elapsed = Date.now() - started;
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/email/i);
+      expect(elapsed).toBeLessThan(1000);
+    });
+
+    it('should reject an over-long email without scanning it', async () => {
+      const response = await request(app)
+        .put('/api/v1/auth/update-profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ email: `${'a'.repeat(300)}@example.com` });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/email/i);
+    });
   });
 
   describe('PUT /auth/change-password', () => {
@@ -148,7 +172,7 @@ describe('AuthController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           currentPassword: 'password123',
-          newPassword: 'newpassword123'
+          newPassword: 'Newpassword123!'
         });
 
       expect(response.status).toBe(200);
@@ -158,8 +182,35 @@ describe('AuthController', () => {
       // C5: the stored value must be a bcrypt hash, not plaintext
       const stored = await userRepository.findById(testUser.id || testUser._id, { includePassword: true });
       expect(stored.password).toMatch(/^\$2[aby]\$/);
-      await expect(userRepository.comparePassword('newpassword123', stored.password)).resolves.toBe(true);
+      await expect(userRepository.comparePassword('Newpassword123!', stored.password)).resolves.toBe(true);
       await expect(userRepository.comparePassword('password123', stored.password)).resolves.toBe(false);
+    });
+
+    it('should reject a weak new password', async () => {
+      const response = await request(app)
+        .put('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          currentPassword: 'password123',
+          newPassword: 'short'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
+      expect(response.body.message).toMatch(/at least 12 characters/);
+    });
+
+    it('should reject a password missing character classes', async () => {
+      const response = await request(app)
+        .put('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          currentPassword: 'password123',
+          newPassword: 'alllowercase123'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/3 of/);
     });
 
     it('should fail with incorrect current password', async () => {
@@ -168,7 +219,7 @@ describe('AuthController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           currentPassword: 'wrongpassword',
-          newPassword: 'newpassword123'
+          newPassword: 'Newpassword123!'
         });
 
       expect(response.status).toBe(401);
@@ -207,7 +258,7 @@ describe('AuthController', () => {
           .send({
             username: 'newuser',
             email: 'new@example.com',
-            password: 'password123',
+            password: 'Password123!x',
             role: 'user'
           });
 
@@ -216,13 +267,26 @@ describe('AuthController', () => {
         expect(response.body.user.username).toBe('newuser');
       });
 
+      it('should reject a weak password', async () => {
+        const response = await request(app)
+          .post('/api/v1/auth/create-user')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            username: 'weakuser',
+            password: 'password123'
+          });
+
+        expect(response.status).toBe(400);
+        expect(response.body.message).toMatch(/at least 12 characters/);
+      });
+
       it('should fail with duplicate username', async () => {
         const response = await request(app)
           .post('/api/v1/auth/create-user')
           .set('Authorization', `Bearer ${adminToken}`)
           .send({
             username: 'testuser', // Already exists
-            password: 'password123'
+            password: 'Password123!x'
           });
 
         expect(response.status).toBe(400);

@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { rejectApiKey } = require('../middleware/apiKeyPermissions');
-const { validate, loginSchema } = require('../utils/validate');
+const { validate, loginSchema, changePasswordSchema, updateProfileSchema, createUserSchema } = require('../utils/validate');
 
 /**
  * @swagger
@@ -160,7 +160,7 @@ router.get('/me', authController.getCurrentUser);
  *       500:
  *         description: Server error
  */
-router.put('/update-profile', authController.updateProfile);
+router.put('/update-profile', validate(updateProfileSchema), authController.updateProfile);
 
 /**
  * @swagger
@@ -200,7 +200,7 @@ router.put('/update-profile', authController.updateProfile);
  *       500:
  *         description: Server error
  */
-router.put('/change-password', authController.changePassword);
+router.put('/change-password', validate(changePasswordSchema), authController.changePassword);
 
 // Admin only routes
 router.use(authorize('admin'));
@@ -352,7 +352,7 @@ router.put('/update-user-role', authController.updateUserRole);
  *       500:
  *         description: Server error
  */
-router.post('/create-user', authController.createUser);
+router.post('/create-user', validate(createUserSchema), authController.createUser);
 
 /**
  * @swagger

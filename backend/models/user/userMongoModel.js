@@ -17,11 +17,11 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     validate: {
       validator: function(v) {
-        // Allow null or validate as email
-        return v === null || v === undefined || v === '' || 
-          /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+        // Allow null/empty, otherwise use the shared linear-time email check (H5).
+        if (v === null || v === undefined || v === '') return true;
+        return require('../../utils/validate').emailSchema.safeParse(v).success;
       },
-      message: props => "Please provide a valid email address or leave it empty"
+      message: props => 'Please provide a valid email address or leave it empty'
     }
   },
   password: {

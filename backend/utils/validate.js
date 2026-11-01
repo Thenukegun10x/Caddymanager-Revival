@@ -54,6 +54,56 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+// H5: cap length before matching and use Zod's linear-time email pattern.
+const emailSchema = z
+  .string()
+  .trim()
+  .max(254, 'email must be at most 254 characters')
+  .email('please provide a valid email address')
+  .transform(v => v.toLowerCase());
+
+// Empty string is allowed where the field is optional (profile forms submit "").
+const optionalEmailSchema = z
+  .union([emailSchema, z.literal('')])
+  .optional()
+  .nullable();
+
+// H4: shared password policy for both database engines.
+const COMMON_PASSWORDS = new Set([
+  'password1234', 'passwordpassword', 'qwertyqwerty', 'letmeinletmein',
+  'adminadmin123', 'welcomewelcome', 'changemechangeme', 'caddymanager',
+  'password12345', '123456789012', 'qwerty123456', 'iloveyou1234',
+]);
+
+const passwordSchema = z
+  .string()
+  .min(12, 'password must be at least 12 characters')
+  .max(128, 'password must be at most 128 characters')
+  .refine(v => {
+    const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/]
+      .filter(re => re.test(v)).length;
+    return classes >= 3;
+  }, 'password must use at least 3 of: lowercase, uppercase, digit, symbol')
+  .refine(v => !COMMON_PASSWORDS.has(v.toLowerCase()), 'password is too common');
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: passwordSchema,
+}).passthrough();
+
+const updateProfileSchema = z.object({
+  username: z.string().trim().min(3).max(30).optional(),
+  email: optionalEmailSchema,
+}).passthrough();
+
+const createUserSchema = z.object({
+  username: z.string().trim().min(3).max(30),
+  email: optionalEmailSchema,
+  password: passwordSchema,
+  role: z.enum(['admin', 'user']).optional(),
+}).passthrough();
+
+
 function validate(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
@@ -73,6 +123,11 @@ module.exports = {
   testConnectionSchema,
   configCreateSchema,
   loginSchema,
+  emailSchema,
+  passwordSchema,
+  changePasswordSchema,
+  updateProfileSchema,
+  createUserSchema,
   validate,
   jsonWithinLimit,
 };
