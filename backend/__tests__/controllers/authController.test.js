@@ -2,6 +2,7 @@ const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const app = require('../../app');
 const userRepository = require('../../repositories/userRepository');
+const apiKeyRepository = require('../../repositories/apiKeyRepository');
 
 // Mock the ping service to avoid actual health checks
 jest.mock('../../services/pingService', () => ({
@@ -106,6 +107,39 @@ describe('AuthController', () => {
       expect(response.status).toBe(401);
       expect(response.body.success).toBe(false);
       expect(response.body.message).toBe('Invalid credentials');
+    });
+  });
+
+  describe('POST /auth/logout (M4)', () => {
+    it('revokes the current JWT and clears the session cookies', async () => {
+      const logout = await request(app)
+        .post('/api/v1/auth/logout')
+        .set('Cookie', `auth_token=${authToken}`);
+
+      expect(logout.status).toBe(200);
+      expect(logout.body.success).toBe(true);
+      expect((logout.headers['set-cookie'] || []).join(';')).toMatch(/auth_token=;/);
+
+      const afterLogout = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(afterLogout.status).toBe(401);
+    });
+
+    it('requires a user session and rejects API keys', async () => {
+      const anonymous = await request(app).post('/api/v1/auth/logout');
+      expect(anonymous.status).toBe(401);
+
+      const apiKey = await apiKeyRepository.createApiKey(
+        testUser.id || testUser._id,
+        'logout-deny-test',
+        { read: true, write: true, delete: true }
+      );
+      const keyValue = apiKey.plaintextKey || apiKey.key;
+      const keyLogout = await request(app)
+        .post('/api/v1/auth/logout')
+        .set('x-api-key', keyValue);
+      expect(keyLogout.status).toBe(403);
     });
   });
 

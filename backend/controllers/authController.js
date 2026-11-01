@@ -146,13 +146,23 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const cookie = authCookie(req);
-  // Clear both the current and the legacy cookie name so an upgrade cannot leave
-  // a valid session cookie behind.
-  res.clearCookie(cookie.name, cookie.options);
-  res.clearCookie('auth_token', cookie.options);
-  res.clearCookie('__Host-auth_token', { ...cookie.options, secure: true });
-  res.json({ success: true, message: 'Logged out' });
+  try {
+    // M4: revoke every outstanding JWT for this user before clearing the browser
+    // cookie. This makes logout effective even if a token was copied elsewhere.
+    const user = await userRepository.incrementTokenVersion(req.user.id);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Not authorized to access this route' });
+    }
+
+    const cookie = authCookie(req);
+    // Clear both the current and legacy cookie names after server-side revocation.
+    res.clearCookie(cookie.name, cookie.options);
+    res.clearCookie('auth_token', cookie.options);
+    res.clearCookie('__Host-auth_token', { ...cookie.options, secure: true });
+    res.json({ success: true, message: 'Logged out' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Unable to log out' });
+  }
 };
 
 // Get current user profile

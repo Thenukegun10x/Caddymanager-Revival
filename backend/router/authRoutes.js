@@ -77,7 +77,7 @@ const { validate, loginSchema, changePasswordSchema, updateProfileSchema, create
  *         description: Server error
  */
 router.post('/login', validate(loginSchema), authController.login);
-router.post('/logout', authController.logout);
+router.post('/logout', protect, rejectApiKey, authController.logout);
 
 // Protected routes - require authentication; API keys may not manage users/credentials
 router.use(protect, rejectApiKey);

@@ -153,6 +153,24 @@ const userRepository = {
     return UserModel.findByIdAndUpdate(id, update, { new: true });
   },
 
+  // Revoke all current JWTs for a user by advancing the version atomically.
+  async incrementTokenVersion(id) {
+    if (isMongoose()) {
+      return UserModel.findByIdAndUpdate(
+        id,
+        { $inc: { tokenVersion: 1 } },
+        { new: true }
+      ).lean();
+    }
+
+    const db = require('../services/sqliteService').getDB();
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      'UPDATE users SET tokenVersion = tokenVersion + 1, updatedAt = ? WHERE id = ?'
+    ).run(now, id);
+    return result.changes ? this.findById(id) : null;
+  },
+
   async findByIdAndDelete(id) {
     if (isMongoose()) {
       // Mongoose
