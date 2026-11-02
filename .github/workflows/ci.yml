@@ -156,6 +156,9 @@ jobs:
           format: sarif
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
+          # required: in SARIF mode the action otherwise drops --severity and
+          # scans ALL severities, so exit-code 1 trips on LOW/MEDIUM findings
+          limit-severities-for-sarif: true
           exit-code: "1"
       - name: Trivy image scan (prod backend) — fail on CRITICAL
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -165,6 +168,7 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           severity: CRITICAL
+          limit-severities-for-sarif: true
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@5ba2889ada762081db2c4f32a729827dce632c7b # v3
         if: always() && hashFiles('trivy-fs.sarif') != ''
