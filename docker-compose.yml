@@ -2,8 +2,8 @@ services:
   # Backend API server
   backend:
     # Hardened Revival images (Docker Hub). Upstream caddymanager/* is unmaintained + unpatched.
-    # TODO: flip to :latest after the post-merge republication of `latest` (v0.1-hardened.1).
-    image: conormorris/caddymanager-backend:fix-security-phase1
+    # `latest` = phase-1 hardened build (digest 26ec6c3a, 2026-11-02); pin by digest for prod if desired.
+    image: conormorris/caddymanager-backend:latest
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -36,7 +36,7 @@ services:
 
   # Frontend web UI
   frontend:
-    image: conormorris/caddymanager-frontend:fix-security-phase1
+    image: conormorris/caddymanager-frontend:latest
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:

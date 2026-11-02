@@ -57,9 +57,8 @@ docker compose -f docker-compose.build.yml logs -f backend
 
 ### C. Docker prebuilt images (prod-like, no build)
 ```bash
-docker compose up -d # pulls conormorris/caddymanager-{backend,frontend} from Docker Hub
-# compose currently pins :fix-security-phase1 (today's hardened multi-arch build)
-# Docker Hub `latest` is still the 2026-09-01 pre-phase-1 build until republished post-merge
+docker compose up -d # pulls conormorris/caddymanager-{backend,frontend}:latest from Docker Hub
+# `latest` = phase-1 hardened multi-arch build, retagged 2026-11-02 (backend digest 26ec6c3a, frontend 25b45168)
 ```
 
 ### D. Isolated test stack (recommended for security verification — does not touch prod volumes)
@@ -78,7 +77,7 @@ docker compose -f docker-compose.build.yml -f docker-compose.test.yml down -v
 
 | File | Purpose | Images | Ports | Networks | When to use |
 |------|---------|--------|-------|----------|-------------|
-| `docker-compose.yml` | prod-like pull | Docker Hub `conormorris/caddymanager-*` (pinned `:fix-security-phase1` until `latest` is republished) | frontend `80:80`; MongoDB only via `docker-compose.mongodb.yml` (loopback) | `caddymanager` | demo, no code change |
+| `docker-compose.yml` | prod-like pull | Docker Hub `conormorris/caddymanager-*:latest` (hardened build, retagged 2026-11-02) | frontend `80:80`; MongoDB only via `docker-compose.mongodb.yml` (loopback) | `caddymanager` | demo, no code change |
 | `docker-compose.build.yml` | local build | `build: ./backend, ./frontend` | same | `caddymanager` | dev, CI build parity |
 | `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.11-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
 
@@ -261,6 +260,6 @@ gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{f
 docker compose config # validate merged yml
 ```
 
-**Image registry reality:** primary distribution is **Docker Hub `conormorris/caddymanager-{backend,frontend}`** (multi-arch amd64+arm64; publish workflows also log in to ghcr.io, but ghcr is stale since the Sept CI failures). Hub `latest` = 2026-09-01 pre-phase-1 until republished; the hardened multi-arch builds live on `:fix-security-phase1` / `:<sha>` tags.
+**Image registry reality:** primary distribution is **Docker Hub `conormorris/caddymanager-{backend,frontend}`** (multi-arch amd64+arm64; publish workflows also log in to ghcr.io, but ghcr is stale since the Sept CI failures). Hub `latest` was server-side retagged to the phase-1 hardened build on 2026-11-02 (backend `26ec6c3a`, frontend `25b45168`); commit-sha and branch tags are kept alongside. **Retag rule:** use `docker buildx imagetools create -t dst src` (copies the full manifest index) — never `docker pull && tag && push`, which flattens multi-arch to the local platform (that is how `latest` became arm64-only in September).
 
 *Last verified: 2026-11-02 on branch `fix/security-phase1` (SQLite Jest 271/271; Mongo Jest 268 passed + 3 skipped; frontend audit 0 vulnerabilities; backend production audit 0 high; Node 22 backend/frontend image builds and runtime smoke passed; test Compose config and frontend/test Caddyfiles valid; repository Trivy vulnerability scan no HIGH/CRITICAL. Image scans had no CRITICAL findings; remaining HIGH findings are recorded in `SECURITY-SWEEP-2026-11-01.md`). Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*

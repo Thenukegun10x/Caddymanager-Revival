@@ -1,6 +1,6 @@
 > **Hardened & upgraded — the maintained successor to CaddyManager.** `Thenukegun10x/Caddymanager-Revival` takes [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (dead since 2026-02-20) and closes every finding from the 2026-11-01 security sweep (see [`SECURITY-SWEEP-2026-11-01.md`](./SECURITY-SWEEP-2026-11-01.md)) — JWT fail-closed, SSRF with connect-time DNS pinning, SQL whitelists, per-user object ownership, scoped API keys — plus Docker image hardening. Full audit in [`PLAN.md`](./PLAN.md), attribution in [`NOTICE.md`](./NOTICE.md). Original MIT © 2025 B Stolk.
 >
-> **Images:** Docker Hub [`conormorris/caddymanager-backend`](https://hub.docker.com/r/conormorris/caddymanager-backend) · [`conormorris/caddymanager-frontend`](https://hub.docker.com/r/conormorris/caddymanager-frontend) (multi-arch amd64 + arm64). ⚠️ Current hardened tags are `fix-security-phase1` / `b3fdae6c` — the `latest` tag still points at the 2026-09-01 pre-phase-1 build until it is republished after merge. `JWT_SECRET` and `ADMIN_PASSWORD` are required (compose fails closed).
+> **Images:** Docker Hub [`conormorris/caddymanager-backend`](https://hub.docker.com/r/conormorris/caddymanager-backend) · [`conormorris/caddymanager-frontend`](https://hub.docker.com/r/conormorris/caddymanager-frontend) (multi-arch amd64 + arm64). `latest` = the phase-1 hardened build as of 2026-11-02 (backend digest `26ec6c3a`, frontend `25b45168`); a versioned release tag lands with the `v0.1-hardened.1` merge. `JWT_SECRET` and `ADMIN_PASSWORD` are required (compose fails closed).
 
 # CaddyManager (Revival)
 
@@ -71,8 +71,8 @@ services:
   # Backend API server
   backend:
     # conormorris/* = hardened Revival builds (this fork). Upstream caddymanager/* is dead + unpatched.
-    # Tag pinned until `latest` is republished post-merge; see https://hub.docker.com/r/conormorris/caddymanager-backend/tags
-    image: conormorris/caddymanager-backend:fix-security-phase1
+    # `latest` = phase-1 hardened build (2026-11-02). Tags: https://hub.docker.com/r/conormorris/caddymanager-backend/tags
+    image: conormorris/caddymanager-backend:latest
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -104,7 +104,7 @@ services:
 
   # Frontend web UI
   frontend:
-    image: conormorris/caddymanager-frontend:fix-security-phase1
+    image: conormorris/caddymanager-frontend:latest
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:
