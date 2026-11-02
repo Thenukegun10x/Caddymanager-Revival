@@ -352,3 +352,15 @@ The initial findings above are retained as the baseline. The following deferred 
 **Verification after follow-up:** SQLite Jest 271/271; MongoDB Jest 268 passed, 3 skipped; frontend `npm audit --audit-level=high` reported 0 vulnerabilities; frontend and test-edge Caddyfiles validated; merged test Compose config validated.
 
 **Audit-chain limitation:** the chain detects accidental or partial database edits, but a database administrator capable of rewriting every row can recompute the chain. External signing/anchoring remains a separate hardening option. Retention policies can also remove old links; the verifier distinguishes a valid retained segment from a chain anchored at genesis.
+
+## Docker hardening follow-up — 2026-11-02
+
+The original Docker findings above remain as the baseline. This follow-up records the image and toolchain review on `fix/security-phase1`:
+
+- Backend builds and tests on Node 22 / Debian 13 (Trixie); production uses a minimal Debian 13 runtime with the Node binary and production dependencies only, UID/GID 10001, and no npm/Corepack or compiler toolchain. Native `better-sqlite3` query smoke checks fail the image build if SQLite cannot load or execute.
+- Frontend builds on Node 22 and runs Caddy 2.11 Alpine as UID 10001. The runtime upgrades Alpine packages before removing the temporary `libcap` package; Caddy retains only `cap_net_bind_service` for port 80. The Caddyfile is validated during the image build.
+- The isolated test-edge and Caddy-server helper defaults now use `caddy:2.11-alpine`; Docker publishing workflows use Node 22.
+
+**Verification:** backend production and test images built; backend runtime reached healthy status with file-backed SQLite; SQLite Jest 271/271; MongoDB Jest 268 passed, 3 skipped; frontend image built and returned HTTP 200; Caddyfile and merged test Compose config validated; repository Trivy filesystem scan reported no HIGH/CRITICAL findings; frontend `npm audit --audit-level=high` reported 0 vulnerabilities. Backend production dependency audit reported 5 MODERATE findings and no HIGH/CRITICAL findings.
+
+**Image-scan note:** Trivy reported no CRITICAL findings in either image after the Alpine package upgrade. It still reports 44 HIGH findings in Debian 13 OS packages in the backend image and 7 HIGH findings in Go dependencies embedded in the Caddy binary. These are image-level findings (not present in the repository filesystem scan); the Caddy Go findings require an upstream patched Caddy build, and the Debian entries have no fixed version listed by the scan database. Re-scan on the next base-image/Caddy update.

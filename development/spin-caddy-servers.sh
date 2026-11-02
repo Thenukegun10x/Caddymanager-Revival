@@ -12,7 +12,7 @@ NUM_SERVERS=3
 DATA_DIR="$PWD/caddy-servers"
 BASE_HTTP_PORT=8000
 DOCKER_NETWORK="caddy-test-network"
-CADDY_IMAGE="caddy:2.10-alpine"
+CADDY_IMAGE="caddy:2.11-alpine"
 
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do

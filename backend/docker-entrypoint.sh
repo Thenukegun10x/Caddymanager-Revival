@@ -3,7 +3,7 @@ set -e
 # Docker entrypoint — auto-migrates SQLite (no user intervention)
 # - Runs generateBuildInfo (idempotent)
 # - Runs DB migration 20250901 (idempotent, backfills createdBy)
-# - Then execs main CMD (npm start)
+# - Then execs the main process (node app.js in the production image)
 
 echo "[entrypoint] Caddymanager-Revival boot"
 

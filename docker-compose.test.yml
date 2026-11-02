@@ -2,7 +2,7 @@
 # Edge :18080 -> frontend:80 -> backend:3000, backend also on caddy-test-network to reach caddy-server-* targets
 services:
   caddy-edge:
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     container_name: caddy-test-edge
     ports: ["18080:80"]
     volumes: ["./test/Caddyfile.edge:/etc/caddy/Caddyfile:ro"]

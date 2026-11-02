@@ -58,7 +58,7 @@ cd development
 - `-p, --start-port <PORT>`: Starting admin API port (default: 2019)
 - `-d, --data-dir <DIR>`: Data directory (default: ./caddy-servers)
 - `-h, --http-port <PORT>`: Starting HTTP port (default: 8000)
-- `-i, --image <IMAGE>`: Caddy Docker image (default: caddy:2.10-alpine)
+- `-i, --image <IMAGE>`: Caddy Docker image (default: caddy:2.11-alpine)
 
 **Example:**
 ```sh

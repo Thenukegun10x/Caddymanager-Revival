@@ -9,7 +9,7 @@ This file is for **both** humans and coding agents (Muse, Cursor, Codex, Opencod
 ## 1. Project Map
 
 ```
-backend/               Node 20 Express, JWT + API keys, SQLite(:memory:/file) or Mongo
+backend/               Node 22 Express, JWT + API keys, SQLite(:memory:/file) or Mongo
   app.js               cors, limits, routes mount, graceful shutdown
   middleware/authMiddleware.js  protect + authorize (JWT fallback bug here)
   controllers/         auth, caddy, apiKey, audit, convert, metrics, buildInfo
@@ -18,7 +18,7 @@ backend/               Node 20 Express, JWT + API keys, SQLite(:memory:/file) or
   models/              Mongoose + better-sqlite3 dual models
   __tests__/           jest + supertest + mongodb-memory-server
   scripts/generateBuildInfo.js
-  Dockerfile           node:20-bullseye-slim (hardening target: bookworm)
+  Dockerfile           node:22-trixie-slim build; minimal Debian 13 non-root runtime
   test-all-engines.sh  runs DB_ENGINE=sqlite + mongo
 frontend/              Vue 3 + Vite + Pinia + Vue Router, ace-editor
   Caddyfile            :80 handle /config (runtime runtimeConfig), /api/* proxy
@@ -78,14 +78,14 @@ docker compose -f docker-compose.build.yml -f docker-compose.test.yml down -v
 |------|---------|--------|-------|----------|-------------|
 | `docker-compose.yml` | prod-like pull | `ghcr.io/caddymanager/*:latest` | frontend `80:80`; MongoDB only via `docker-compose.mongodb.yml` (loopback) | `caddymanager` | demo, no code change |
 | `docker-compose.build.yml` | local build | `build: ./backend, ./frontend` | same | `caddymanager` | dev, CI build parity |
-| `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.10-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
+| `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.11-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
 
 **`docker-compose.test.yml` source of truth:**
 ```yaml
 # docker-compose.test.yml — consume with -f docker-compose.build.yml -f docker-compose.test.yml
 services:
   caddy-edge:
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     container_name: caddy-test-edge
     ports: ["18080:80"]
     volumes: ["./test/Caddyfile.edge:/etc/caddy/Caddyfile:ro"]
@@ -167,7 +167,7 @@ bash test-all-engines.sh                 # sqlite then mongo (needs mongod or us
 npm run test:coverage
 ```
 
-### Dockerised tests (host without Node 20)
+### Dockerised tests (host without Node 22)
 The production image is pruned of dev deps (H3). Build the test target first:
 ```bash
 docker build --target test -t caddymanager/caddymanager-backend:test ./backend
@@ -259,4 +259,4 @@ gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{f
 docker compose config # validate merged yml
 ```
 
-*Last verified: 2026-11-01 on branch `fix/security-phase1` (SQLite Jest 271/271; Mongo Jest 268 passed + 3 skipped; frontend audit 0 vulnerabilities; test Compose config valid; frontend/test Caddyfiles valid). Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*
+*Last verified: 2026-11-02 on branch `fix/security-phase1` (SQLite Jest 271/271; Mongo Jest 268 passed + 3 skipped; frontend audit 0 vulnerabilities; backend production audit 0 high; Node 22 backend/frontend image builds and runtime smoke passed; test Compose config and frontend/test Caddyfiles valid; repository Trivy vulnerability scan no HIGH/CRITICAL. Image scans had no CRITICAL findings; remaining HIGH findings are recorded in `SECURITY-SWEEP-2026-11-01.md`). Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*
