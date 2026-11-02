@@ -167,8 +167,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}-backend:next
             ghcr.io/${{ github.repository }}-backend:${{ steps.package-version.outputs.version }}-next
-            caddymanager/caddymanager-backend:next
-            caddymanager/caddymanager-backend:${{ steps.package-version.outputs.version }}-next
+            conormorris/caddymanager-backend:next
+            conormorris/caddymanager-backend:${{ steps.package-version.outputs.version }}-next
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

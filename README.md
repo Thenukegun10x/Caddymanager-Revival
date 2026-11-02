@@ -1,12 +1,23 @@
-> **Hardened Revival Fork** — This is `Thenukegun10x/Caddymanager-Revival`, a security-hardened revival of [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (stale since 2026-02-20, `archived:false` but unmaintained). See [`PLAN.md`](./PLAN.md) for audit (Critical SSRF/JWT/SQLi/IDOR) and [`NOTICE.md`](./NOTICE.md) for attribution. Original MIT © 2025 B Stolk.
+> **Hardened & upgraded — the maintained successor to CaddyManager.** `Thenukegun10x/Caddymanager-Revival` takes [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (dead since 2026-02-20) and closes every finding from the 2026-11-01 security sweep (see [`SECURITY-SWEEP-2026-11-01.md`](./SECURITY-SWEEP-2026-11-01.md)) — JWT fail-closed, SSRF with connect-time DNS pinning, SQL whitelists, per-user object ownership, scoped API keys — plus Docker image hardening. Full audit in [`PLAN.md`](./PLAN.md), attribution in [`NOTICE.md`](./NOTICE.md). Original MIT © 2025 B Stolk.
 >
-> **Status:** Phase 0 baseline forked at `52f69b64`. `main` is hardened stable; `develop` tracks upstream. Do not expose to Internet until `v0.1-hardened.1`. Set strong `JWT_SECRET`!
+> **Images:** Docker Hub [`conormorris/caddymanager-backend`](https://hub.docker.com/r/conormorris/caddymanager-backend) · [`conormorris/caddymanager-frontend`](https://hub.docker.com/r/conormorris/caddymanager-frontend) (multi-arch amd64 + arm64). ⚠️ Current hardened tags are `fix-security-phase1` / `b3fdae6c` — the `latest` tag still points at the 2026-09-01 pre-phase-1 build until it is republished after merge. `JWT_SECRET` and `ADMIN_PASSWORD` are required (compose fails closed).
 
-# CaddyManager
+# CaddyManager (Revival)
 
 Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack with support for both SQLite and MongoDB databases.
 
-> **Caution:** CaddyManager is in early development. Please _backup your Caddy configurations_ and data before testing. Use at your own risk.
+> **Caution:** CaddyManager is in active development. Please _backup your Caddy configurations_ and data before testing. This fork ships the hardened security model below, but any reverse-proxy control plane should run on a network you control.
+
+## 🔒 What this fork adds over upstream
+
+- **Auth hardening** — JWT fails closed (no fallback secret, `HS256` pinned, `tokenVersion` revocation incl. logout), httpOnly `__Host-` cookie sessions, bcrypt timing equalizer, password policy + linear-time email validation
+- **SSRF shield** — connect-time DNS validation with pinned resolved IPs (ipaddr CIDR checks, full IPv6: ULA/`::`/link-local), metadata always denied, exact-host production allowlist (`ALLOW_PRIVATE_HOSTS`), `maxRedirects: 0`
+- **Object-level RBAC** — servers and configs scoped by `createdBy`; a normal user can no longer read/apply/delete other users' Caddy configs; metrics/build-info/Swagger are admin-gated
+- **Scoped API keys** — SHA-256 at rest, 8-char display prefix, read/write/delete enforced per route, keys barred from auth & key-management endpoints
+- **Verifiable audit log** — SHA-256 hash chain (sequence + prev-hash) with admin integrity endpoint `/api/v1/audit-logs/integrity`
+- **Injection-safe data layer** — column whitelists in every SQLite update path, parameterized throughout, generic error responses with correlation IDs
+- **Edge & transport** — helmet, CORS allowlist (deny by default), rate limits (login/API/test-connection), `Cache-Control: no-store` on auth, no `v-html`/`eval` in the SPA, CSP without `unsafe-eval`
+- **Supply chain** — production images carry prod-deps only, non-root UID 10001, pinned Actions, `npm audit` blocking at HIGH in CI, Trivy fs gates, dual-engine (SQLite + MongoDB) jest suites
 
 
 ---
@@ -37,19 +48,31 @@ Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack
 ---
 
 ## 📢 Status
-This project is in active development, gearing up for a v0.1 release. Feedback and testing are appreciated!
+Phase 1 hardening complete and CI-verified on [`PR #1`](https://github.com/Thenukegun10x/Caddymanager-Revival/pull/1) → `main`; first tagged release `v0.1-hardened.1` (and `latest` image republication) lands with that merge. `develop` tracks upstream for future syncs — upstream is unmaintained, so this fork is the primary source.
 
 ---
 
+## 🚀 Quick start (Docker Hub images)
+
+```bash
+# .env next to docker-compose.yml:
+#   JWT_SECRET=$(openssl rand -hex 32)   REQUIRED
+#   ADMIN_PASSWORD=<12+ chars>           REQUIRED on first boot
+docker compose pull && docker compose up -d
+# then login at http://localhost as admin:<ADMIN_PASSWORD>
+```
+
 ## 🐳 Docker Compose Example
 
-Below is the updated `docker-compose.yml` for running both backend and frontend. CaddyManager uses SQLite by default for zero-configuration setup, but you can optionally use MongoDB:
+The `docker-compose.yml` below runs both backend and frontend from the Revival images. SQLite is the default; MongoDB is optional via the overlay:
 
 ```yaml
 services:
   # Backend API server
   backend:
-    image: caddymanager/caddymanager-backend:latest
+    # conormorris/* = hardened Revival builds (this fork). Upstream caddymanager/* is dead + unpatched.
+    # Tag pinned until `latest` is republished post-merge; see https://hub.docker.com/r/conormorris/caddymanager-backend/tags
+    image: conormorris/caddymanager-backend:fix-security-phase1
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -81,7 +104,7 @@ services:
 
   # Frontend web UI
   frontend:
-    image: caddymanager/caddymanager-frontend:latest
+    image: conormorris/caddymanager-frontend:fix-security-phase1
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:
@@ -253,8 +276,8 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/YOUR_USERNAME/caddymanager.git
-   cd caddymanager
+   git clone https://github.com/Thenukegun10x/Caddymanager-Revival.git
+   cd Caddymanager-Revival
    ```
 2. **Install dependencies:**
    ```sh
@@ -318,5 +341,6 @@ This project is not endorsed by, directly affiliated with, maintained, authorize
 
 Have questions, feedback, or want to contribute? Feel free to reach out:
 
-- Email: [bastian@bastianstolk.com](mailto:bastian@bastianstolk.com)
-- Open an issue or pull request on GitHub
+- Open an issue or pull request on [GitHub](https://github.com/Thenukegun10x/Caddymanager-Revival) — this fork is the active one
+- Security reports: see [`SECURITY.md`](./SECURITY.md) (do not open public issues for vulnerabilities)
+- Upstream attribution: original project by B Stolk ([caddymanager/caddymanager](https://github.com/caddymanager/caddymanager), MIT © 2025), unmaintained since 2026-02-20
