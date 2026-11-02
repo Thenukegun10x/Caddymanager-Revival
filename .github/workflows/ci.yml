@@ -148,8 +148,8 @@ jobs:
             BUILD_NUMBER=${{ github.run_number }}
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.ref_name }}
-      - name: Run Trivy (fs + image) — fail on CRITICAL
-        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # 0.24.0
+      - name: Trivy fs scan (repo) — fail on CRITICAL/HIGH
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -157,10 +157,23 @@ jobs:
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
           exit-code: "1"
+      - name: Trivy image scan (prod backend) — fail on CRITICAL
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: caddymanager-test-backend:ci
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL
+          exit-code: "1"
       - uses: github/codeql-action/upload-sarif@5ba2889ada762081db2c4f32a729827dce632c7b # v3
-        if: always()
+        if: always() && hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
+      - uses: github/codeql-action/upload-sarif@5ba2889ada762081db2c4f32a729827dce632c7b # v3
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        with:
+          sarif_file: trivy-image.sarif
       - name: Docker config validate
         env:
           # Placeholders only — config interpolation requires them to be set
