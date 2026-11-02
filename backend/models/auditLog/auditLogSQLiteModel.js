@@ -16,8 +16,16 @@ function ensureTable() {
 		userAgent TEXT,
 		timestamp TEXT NOT NULL,
 		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
+		updatedAt TEXT NOT NULL,
+		chainSequence INTEGER,
+		previousHash TEXT,
+		entryHash TEXT
 	)`).run();
+	// Upgrade existing SQLite databases without changing historical rows.
+	for (const [column, type] of [['chainSequence', 'INTEGER'], ['previousHash', 'TEXT'], ['entryHash', 'TEXT']]) {
+		try { db.prepare(`ALTER TABLE audit_logs ADD COLUMN ${column} ${type}`).run(); } catch (_) {}
+	}
+	db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_chain_sequence ON audit_logs(chainSequence) WHERE chainSequence IS NOT NULL').run();
 }
 
 ensureTable();
@@ -27,8 +35,8 @@ const AuditLogSQLiteModel = {
 		const db = getDB();
 		const now = new Date();
 		const stmt = db.prepare(`INSERT INTO audit_logs (
-			action, userId, username, resourceType, resourceId, details, statusCode, ipAddress, userAgent, timestamp, createdAt, updatedAt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+			action, userId, username, resourceType, resourceId, details, statusCode, ipAddress, userAgent, timestamp, createdAt, updatedAt, chainSequence, previousHash, entryHash
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 		const info = stmt.run(
 			log.action,
 			log.user && log.user.userId ? log.user.userId : null,
@@ -41,7 +49,10 @@ const AuditLogSQLiteModel = {
 			log.userAgent || null,
 			(log.timestamp ? new Date(log.timestamp) : now).toISOString(),
 			now.toISOString(),
-			now.toISOString()
+			now.toISOString(),
+			log.chainSequence || null,
+			log.previousHash || null,
+			log.entryHash || null
 		);
 		return { id: info.lastInsertRowid, _id: info.lastInsertRowid, ...log, createdAt: now, updatedAt: now };
 	},

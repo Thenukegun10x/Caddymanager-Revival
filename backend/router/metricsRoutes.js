@@ -2,9 +2,10 @@ const express = require('express')
 const router = express.Router()
 const metricsController = require('../controllers/metricsController')
 const { protect, authorize } = require('../middleware/authMiddleware')
+const { enforceApiKeyPermissions } = require('../middleware/apiKeyPermissions')
 
 // Protect all metrics — H1 fix (was public, leaked inventory)
-router.use(protect)
+router.use(protect, enforceApiKeyPermissions)
 
 /**
  * @openapi

@@ -1,6 +1,6 @@
 const axios = require('axios');
 const CaddyServer = require('../models/caddyServers');
-const { assertSafeApiUrl, assertSafePort, assertSafeAdminApiPath } = require('../utils/ssrf');
+const { assertSafeApiUrl, assertSafePort, assertSafeAdminApiPath, axiosSafeOpts } = require('../utils/ssrf');
 
 // Environment variables
 const PING_INTERVAL = process.env.PING_INTERVAL || 300000; // Default to 5 minutes (300000 ms) if not set
@@ -54,9 +54,8 @@ const pingServer = async (server) => {
     const url = `${base}:${server.apiPort}${server.adminApiPath}`;
     
     const requestOptions = {
+      ...axiosSafeOpts,
       timeout: parseInt(PING_TIMEOUT, 10),
-      validateStatus: null,
-      maxRedirects: 0,
       maxContentLength: 100000,
     };
 
@@ -191,6 +190,8 @@ const startPingService = () => {
     pingInProgress = true;
     try { await pingAllServers(); } finally { pingInProgress = false; }
   }, intervalMs);
+  // unref: the HTTP server owns process lifetime; this timer must not hold CI/Jest open
+  pingInterval.unref?.();
   
   // Run an initial ping immediately (guarded)
   (async () => {

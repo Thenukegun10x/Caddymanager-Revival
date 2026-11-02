@@ -9,7 +9,7 @@ This file is for **both** humans and coding agents (Muse, Cursor, Codex, Opencod
 ## 1. Project Map
 
 ```
-backend/               Node 20 Express, JWT + API keys, SQLite(:memory:/file) or Mongo
+backend/               Node 22 Express, JWT + API keys, SQLite(:memory:/file) or Mongo
   app.js               cors, limits, routes mount, graceful shutdown
   middleware/authMiddleware.js  protect + authorize (JWT fallback bug here)
   controllers/         auth, caddy, apiKey, audit, convert, metrics, buildInfo
@@ -18,7 +18,7 @@ backend/               Node 20 Express, JWT + API keys, SQLite(:memory:/file) or
   models/              Mongoose + better-sqlite3 dual models
   __tests__/           jest + supertest + mongodb-memory-server
   scripts/generateBuildInfo.js
-  Dockerfile           node:20-bullseye-slim (hardening target: bookworm)
+  Dockerfile           node:22-trixie-slim build; minimal Debian 13 non-root runtime
   test-all-engines.sh  runs DB_ENGINE=sqlite + mongo
 frontend/              Vue 3 + Vite + Pinia + Vue Router, ace-editor
   Caddyfile            :80 handle /config (runtime runtimeConfig), /api/* proxy
@@ -26,7 +26,7 @@ frontend/              Vue 3 + Vite + Pinia + Vue Router, ace-editor
   src/services/        apiService, configService (api_base_url poison risk)
   src/components/configurations/*DataComp.vue  v-html XSS surface
 development/           build-caddy-sandbox.sh, spin-caddy-servers.sh (targets)
-docker-compose.yml     pull ghcr.io images (prod-like)
+docker-compose.yml     pull Docker Hub conormorris/* (prod-like, hardened tag pinned)
 docker-compose.build.yml  build from ./backend, ./frontend (dev)
 docker-compose.test.yml   edge caddy + isolated networks (test, see §3)
 test/Caddyfile.edge    edge reverse_proxy frontend:80
@@ -40,11 +40,11 @@ PLAN.md / NOTICE.md / SECURITY.md  hardened fork docs
 ### A. Bare metal (fastest for agents)
 ```bash
 # backend
-cd backend && npm ci && cp .env.example .env # set JWT_SECRET=$(openssl rand -hex 32)
+cd backend && npm ci && cp .env.example .env # set JWT_SECRET=$(openssl rand -hex 32) and ADMIN_PASSWORD
 npm run dev # :3000
 # frontend in second shell
 cd frontend && npm install && npm run dev # :5173, proxy to :3000 via vite.config.js
-# login admin:caddyrocks -> change immediately
+# first boot: login admin:<ADMIN_PASSWORD>; the old caddyrocks default is gone
 ```
 
 ### B. Docker built from source (closest to CI)
@@ -57,7 +57,8 @@ docker compose -f docker-compose.build.yml logs -f backend
 
 ### C. Docker prebuilt images (prod-like, no build)
 ```bash
-docker compose up -d # pulls caddymanager/caddymanager-backend:latest
+docker compose up -d # pulls conormorris/caddymanager-{backend,frontend}:latest from Docker Hub
+# `latest` = phase-1 hardened multi-arch build, retagged 2026-11-02 (backend digest 26ec6c3a, frontend 25b45168)
 ```
 
 ### D. Isolated test stack (recommended for security verification — does not touch prod volumes)
@@ -76,16 +77,16 @@ docker compose -f docker-compose.build.yml -f docker-compose.test.yml down -v
 
 | File | Purpose | Images | Ports | Networks | When to use |
 |------|---------|--------|-------|----------|-------------|
-| `docker-compose.yml` | prod-like pull | `ghcr.io/caddymanager/*:latest` | frontend `80:80`, mongodb `27017` optional | `caddymanager` | demo, no code change |
+| `docker-compose.yml` | prod-like pull | Docker Hub `conormorris/caddymanager-*:latest` (hardened build, retagged 2026-11-02) | frontend `80:80`; MongoDB only via `docker-compose.mongodb.yml` (loopback) | `caddymanager` | demo, no code change |
 | `docker-compose.build.yml` | local build | `build: ./backend, ./frontend` | same | `caddymanager` | dev, CI build parity |
-| `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.10-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
+| `docker-compose.test.yml` | isolated test (created here) | build + edge `caddy:2.11-alpine` | edge `18080:80`, frontend internal | `caddymanager` + `caddy-test-network` (external, created by spin scripts) | security PoCs, SSRF, CORS, don't pollute prod `sqlite_data` |
 
 **`docker-compose.test.yml` source of truth:**
 ```yaml
 # docker-compose.test.yml — consume with -f docker-compose.build.yml -f docker-compose.test.yml
 services:
   caddy-edge:
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     container_name: caddy-test-edge
     ports: ["18080:80"]
     volumes: ["./test/Caddyfile.edge:/etc/caddy/Caddyfile:ro"]
@@ -97,6 +98,7 @@ services:
       CORS_ORIGIN: "http://localhost:18080"
       CADDY_SANDBOX_URL: "http://caddy-sandbox:2020"
       JWT_SECRET: "${JWT_SECRET:?set in .env.test.local}" # fail fast, no fallback
+      ALLOW_PRIVATE_HOSTS: "caddy-server-1,caddy-server-2,caddy-sandbox"
 volumes:
   sqlite_data: # ephemeral when down -v
 networks:
@@ -108,9 +110,9 @@ networks:
 ```
 :80 {
   reverse_proxy frontend:80
-  header Strict-Transport-Security "max-age=31536000"
 }
 ```
+Set HSTS at the TLS-terminating proxy; this test edge is HTTP-only.
 
 **Common env overrides:** see `.env.example` + `docker-compose.yml:24-41`. Always set `JWT_SECRET` via `openssl rand -hex 32`; never use `your_jwt_secret_key_here` nor empty. `CORS_ORIGIN` must be allowlist, not `*`. `DB_ENGINE=sqlite` default (`SQLITE_DB_PATH=/app/data/caddymanager.sqlite`), or `mongodb` with `MONGODB_URI`.
 
@@ -125,7 +127,9 @@ networks:
 PORT=3000
 DB_ENGINE=sqlite # sqlite | mongodb
 SQLITE_DB_PATH=./caddymanager.sqlite # or :memory: for jest
-MONGODB_URI=mongodb://mongoadmin:...@mongodb:27017/caddymanager?authSource=admin
+MONGODB_URI= # full URI from your secrets manager; no credentials in compose
+MONGO_USERNAME=mongoadmin # only for docker-compose.mongodb.yml
+MONGO_PASSWORD= # REQUIRED by that overlay (12+ chars, openssl rand -hex 24)
 CORS_ORIGIN=http://localhost:5173,http://localhost:80
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
@@ -136,6 +140,10 @@ AUDIT_LOG_RETENTION_DAYS=90
 METRICS_HISTORY_MAX=1000
 JWT_SECRET= # REQUIRED, 32+ hex, no fallback (fix for middleware/authMiddleware.js:6)
 JWT_EXPIRATION=24h # code also reads JWT_EXPIRES_IN — support both
+ALLOW_BEARER_TOKEN=false # true only for CLI clients that need the token in the login body
+ADMIN_PASSWORD= # REQUIRED on first boot when users table is empty (12+ chars)
+ALLOW_PRIVATE_HOSTS= # comma-separated exact private Caddy target hostnames (production allowlist)
+ALLOW_PRIVATE_IPS=false # broad non-production/testing opt-in only; ignored in production
 ```
 
 **Frontend `frontend/.env` / Caddy `{$APP_NAME}` / `{$DARK_MODE}` / `{$BACKEND_HOST}`:**
@@ -160,6 +168,15 @@ bash test-all-engines.sh                 # sqlite then mongo (needs mongod or us
 npm run test:coverage
 ```
 
+### Dockerised tests (host without Node 22)
+The production image is pruned of dev deps (H3). Build the test target first:
+```bash
+docker build --target test -t conormorris/caddymanager-backend:test ./backend
+docker run --rm -e NODE_PATH=/usr/src/node-app/node_modules \
+  -v "$PWD/backend:/src" -w /src conormorris/caddymanager-backend:test \
+  /usr/src/node-app/node_modules/.bin/jest --runInBand --forceExit
+```
+
 ### Docker smoke
 ```bash
 docker compose -f docker-compose.build.yml up --build -d
@@ -171,7 +188,7 @@ docker compose -f docker-compose.build.yml down -v
 
 ### Security PoCs (run against docker, expect DENY after Phase 1)
 ```bash
-TOKEN=$(curl -s http://localhost:18080/api/v1/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"caddyrocks"}' | jq -r .token)
+TOKEN=$(curl -s http://localhost:18080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" | jq -r .token)
 # C2 SSRF
 curl -s http://localhost:18080/api/v1/caddy/test-connection -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"apiUrl":"http://169.254.169.254","apiPort":80,"adminApiPath":"/latest/meta-data/"}' | jq # -> 400
 # C3 SQLi
@@ -206,7 +223,10 @@ To add servers in UI: `Servers -> Add Server -> API URL=http://caddy-server-1 (c
 ## 7. Agent Rules — Do Not Reintroduce PLAN.md:4 Bugs
 
 - **JWT:** Never add `|| 'hardcoded'`. `backend/middleware/authMiddleware.js:6` must `throw if !JWT_SECRET`, `jwt.verify(..., {algorithms:['HS256']})`. Support `JWT_EXPIRATION` + `JWT_EXPIRES_IN`.
-- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeUrl` — deny `10/8,172.16/12,192.168/16,169.254/16,127/8,::1`, enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`.
+- **SSRF:** All `apiUrl/apiPort/adminApiPath` (services/caddyService.js:16,89,113, convertService.js:22, pingService.js:44, controllers/caddyController.js:68) must call `utils/ssrf.js:assertSafeApiUrl/assertSafeServerConfig` — deny RFC1918/ULA unless the exact hostname is in `ALLOW_PRIVATE_HOSTS`; always deny CGNAT, loopback, link-local and metadata; enforce `http(s)://` + `^/[\w\/-]*$` for path, `maxRedirects:0`. Use `axiosSafeOpts` (CIDR checks + `safeLookup` + literal-IP `createConnection` guard); never re-introduce string-prefix checks or production-wide `ALLOW_PRIVATE_IPS` bypasses.
+- **API keys:** only `sha256(key)` at rest with an 8-char `keyPrefix`; plaintext is returned once at creation. `middleware/apiKeyPermissions.js` maps GET/HEAD→read, DELETE→delete, everything else→write, and blocks keys from auth/key-management routes.
+- **Errors:** respond with a generic message + `errorId` (`utils/httpError.js`); never return `error.message`/stacks in production. `app.js` installs `scrubErrorResponses` as defense in depth.
+- **Passwords/emails:** use the shared `utils/validate.js` schemas (12-128 chars, 3 character classes, common-password denylist, 254-char linear-time email). Never add a backtracking email regex.
 - **SQL:** Never interpolate `` `${key} = ?` ``. Whitelist `ALLOWED` in `repositories/*` and `models/*SQLiteModel.js:111`. Test column injection.
 - **RBAC:** `router/caddyRoutes.js:8` must have `protect` + ownership check `createdBy===req.user.id || role===admin`. No handler without it.
 - **Metrics:** `router/metricsRoutes.js:31` / `buildInfoRoutes.js` require `protect, authorize('admin')` or `127.0.0.1` allowlist.
@@ -234,10 +254,12 @@ fix/jwt-secret, fix/ssrf-deny, fix/sql-whitelist, fix/rbac ...
 ## 9. Repo Ops
 
 ```bash
-# fork already: origin=Thenukegun10x/Caddymanager-Revival, upstream=caddymanager/caddymanager
+# fork already: origin=Thenukegun10x/Caddymanager-Revival, upstream=caddymanager/caddymanager (dead since 2026-02-20)
 gh repo view --web
 gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{full_name}}'
 docker compose config # validate merged yml
 ```
 
-*Last verified: 2026-09-01 @14cfcbad. Keep this file updated with every docker-compose or env change.*
+**Image registry reality:** primary distribution is **Docker Hub `conormorris/caddymanager-{backend,frontend}`** (multi-arch amd64+arm64; publish workflows also log in to ghcr.io, but ghcr is stale since the Sept CI failures). Hub `latest` was server-side retagged to the phase-1 hardened build on 2026-11-02 (backend `26ec6c3a`, frontend `25b45168`); commit-sha and branch tags are kept alongside. **Retag rule:** use `docker buildx imagetools create -t dst src` (copies the full manifest index) — never `docker pull && tag && push`, which flattens multi-arch to the local platform (that is how `latest` became arm64-only in September).
+
+*Last verified: 2026-11-02 on branch `fix/security-phase1` (SQLite Jest 271/271; Mongo Jest 268 passed + 3 skipped; frontend audit 0 vulnerabilities; backend production audit 0 high; Node 22 backend/frontend image builds and runtime smoke passed; test Compose config and frontend/test Caddyfiles valid; repository Trivy vulnerability scan no HIGH/CRITICAL. Image scans had no CRITICAL findings; remaining HIGH findings are recorded in `SECURITY-SWEEP-2026-11-01.md`). Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*

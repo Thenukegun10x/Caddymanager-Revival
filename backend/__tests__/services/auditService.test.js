@@ -1,10 +1,17 @@
 const auditService = require('../../services/auditService');
+const mongoose = require('mongoose');
+
+const isMongo = process.env.DB_ENGINE === 'mongodb';
+const userId1 = isMongo ? new mongoose.Types.ObjectId() : 123;
+const userId2 = isMongo ? new mongoose.Types.ObjectId() : 456;
+const missingUserId = isMongo ? new mongoose.Types.ObjectId() : 999;
+const normalizedUserId = isMongo ? new mongoose.Types.ObjectId() : 'mongo-id-123';
 
 describe('auditService', () => {
   let testLogs = [];
 
   const sampleUser = {
-    id: 123,
+    id: userId1,
     username: 'testuser'
   };
 
@@ -110,13 +117,13 @@ describe('auditService', () => {
     test('should normalize user object for different ID formats', async () => {
       const mongoUserLog = {
         ...sampleLogData,
-        user: { _id: 'mongo-id-123', username: 'mongouser' }
+        user: { _id: normalizedUserId, username: 'mongouser' }
       };
 
       const result = await auditService.logAction(mongoUserLog);
       
       expect(result).toBeDefined();
-      expect(result.user.userId).toBe('mongo-id-123');
+      expect(String(result.user.userId)).toBe(String(normalizedUserId));
       expect(result.user.username).toBe('mongouser');
       
       if (result) {
@@ -288,9 +295,9 @@ describe('auditService', () => {
     beforeEach(async () => {
       // Create logs for specific users
       const logs = [
-        { ...sampleLogData, user: { userId: 123, username: 'user1' }, action: 'create' },
-        { ...sampleLogData, user: { userId: 123, username: 'user1' }, action: 'update' },
-        { ...sampleLogData, user: { userId: 456, username: 'user2' }, action: 'delete' }
+        { ...sampleLogData, user: { userId: userId1, username: 'user1' }, action: 'create' },
+        { ...sampleLogData, user: { userId: userId1, username: 'user1' }, action: 'update' },
+        { ...sampleLogData, user: { userId: userId2, username: 'user2' }, action: 'delete' }
       ];
 
       for (const logData of logs) {
@@ -302,26 +309,26 @@ describe('auditService', () => {
     });
 
     test('should retrieve logs for specific user', async () => {
-      const result = await auditService.getUserAuditLogs(123);
+      const result = await auditService.getUserAuditLogs(userId1);
       
       expect(Array.isArray(result)).toBe(true);
       
       // All logs should be for the specified user
       result.forEach(log => {
         const logUserId = log.userId || (log.user && log.user.userId);
-        expect(logUserId).toBe(123);
+        expect(String(logUserId)).toBe(String(userId1));
       });
     });
 
     test('should handle pagination for user logs', async () => {
-      const result = await auditService.getUserAuditLogs(123, { limit: 1 });
+      const result = await auditService.getUserAuditLogs(userId1, { limit: 1 });
       
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBeLessThanOrEqual(1);
     });
 
     test('should return empty array for non-existent user', async () => {
-      const result = await auditService.getUserAuditLogs(999);
+      const result = await auditService.getUserAuditLogs(missingUserId);
       
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBe(0);

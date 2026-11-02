@@ -56,7 +56,8 @@ exports.createApiKey = async (req, res) => {
       apiKey: {
         id: apiKey._id,
         name: apiKey.name,
-        key: apiKey.key, // This is the only time we'll send the full key back
+        key: apiKey.plaintextKey, // plaintext is available only at creation time
+        keyPrefix: apiKey.keyPrefix,
         permissions: apiKey.permissions,
         expiresAt: apiKey.expiresAt,
         createdAt: apiKey.createdAt

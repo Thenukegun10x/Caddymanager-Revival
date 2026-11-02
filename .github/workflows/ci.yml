@@ -3,7 +3,8 @@ name: CI — Tests + Security Gates
 # Enforces AGENTS.md §5 & §7 and PLAN.md P0 fixes. Fails PR if any gate red.
 on:
   push:
-    branches: [main, develop]
+    # fix/** included so hardening branches get CI on push, not only via PR (§8)
+    branches: [main, develop, 'fix/**']
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -47,10 +48,9 @@ jobs:
           JWT_SECRET: ci-test-secret-do-not-use-in-prod
           NODE_ENV: test
         run: npm run test:coverage -- --runInBand
-      - name: npm audit — warn on high (not blocking until dep upgrades land, see PLAN.md)
+      - name: npm audit - block on high
         working-directory: backend
-        continue-on-error: true
-        run: npm audit --audit-level=high || echo "::warning::backend audit high — track in PLAN.md H3"
+        run: npm audit --audit-level=high
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -71,10 +71,9 @@ jobs:
       - name: Install (frontend)
         working-directory: frontend
         run: npm ci
-      - name: Audit (frontend) — warn on high (vite/axios transitive, see PLAN.md H3)
+      - name: Audit (frontend) - block on high
         working-directory: frontend
-        continue-on-error: true
-        run: npm audit --audit-level=high || echo "::warning::frontend audit high — track in PLAN.md H3"
+        run: npm audit --audit-level=high
       - name: Build
         working-directory: frontend
         run: npm run build
@@ -131,7 +130,8 @@ jobs:
   docker-trivy:
     runs-on: ubuntu-latest
     needs: [backend-test, frontend-build]
-    if: always() && (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped')
+    # default needs-approval: only run when both builds are green (the old
+    # always() gate let this job run even when frontend-build failed)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Docker Buildx
@@ -148,20 +148,44 @@ jobs:
             BUILD_NUMBER=${{ github.run_number }}
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.ref_name }}
-      - name: Run Trivy (fs + image) — fail on CRITICAL
-        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # 0.24.0
+      - name: Trivy fs scan (repo) — fail on CRITICAL/HIGH
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
+          # required: in SARIF mode the action otherwise drops --severity and
+          # scans ALL severities, so exit-code 1 trips on LOW/MEDIUM findings
+          limit-severities-for-sarif: true
+          exit-code: "1"
+      - name: Trivy image scan (prod backend) — fail on CRITICAL
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: caddymanager-test-backend:ci
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL
+          limit-severities-for-sarif: true
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@5ba2889ada762081db2c4f32a729827dce632c7b # v3
-        if: always()
+        if: always() && hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
+          # distinct category required: one upload-sarif per tool/category per job
+          category: trivy-fs
+      - uses: github/codeql-action/upload-sarif@5ba2889ada762081db2c4f32a729827dce632c7b # v3
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
       - name: Docker config validate
+        env:
+          # Placeholders only — config interpolation requires them to be set
+          JWT_SECRET: ci-compose-validation-secret-at-least-32-chars
+          ADMIN_PASSWORD: ci-compose-validation-password
         run: |
           docker compose -f docker-compose.build.yml config >/dev/null
           docker compose -f docker-compose.build.yml -f docker-compose.test.yml config >/dev/null

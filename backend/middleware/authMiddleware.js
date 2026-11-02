@@ -2,20 +2,10 @@ const jwt = require('jsonwebtoken');
 const userRepository = require('../repositories/userRepository');
 const ApiKey = require('../models/apiKey');
 
-// Environment variables — fail fast if JWT_SECRET not set (except test)
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'test') return 'test-jwt-secret-for-ci-only-not-for-prod';
-    throw new Error('JWT_SECRET must be set — refusing to start with insecure default (see AGENTS.md §4)');
-  }
-  return secret;
-}
-// Fail fast at import in non-test so app does not boot with insecure default
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
-  throw new Error('JWT_SECRET environment variable is required');
-}
-const JWT_SECRET = process.env.JWT_SECRET; // kept for backwards compat, but getJwtSecret() is canonical
+const { getJwtSecret } = require('../utils/jwtSecret');
+
+// Fail fast at import in non-test so the app never boots with an insecure default (C1)
+getJwtSecret();
 
 // Protect routes - supports both JWT and API key authentication
 exports.protect = async (req, res, next) => {
@@ -43,9 +33,9 @@ exports.protect = async (req, res, next) => {
       isApiKey = true;
     }
 
-    // Also check httpOnly cookie (Set D, mitigates XSS)
-    if (!token && req.cookies && req.cookies.auth_token) {
-      token = req.cookies.auth_token;
+    // Also check httpOnly cookie (accept the hardened __Host- form and legacy name)
+    if (!token && req.cookies) {
+      token = req.cookies['__Host-auth_token'] || req.cookies.auth_token;
     }
     
     // Check if token exists
@@ -132,17 +122,18 @@ exports.protect = async (req, res, next) => {
       
       next();
     } catch (error) {
+      // Do not reveal why a token failed (expired vs bad signature vs version)
+      console.warn(`[auth] token rejected: ${error.message}`);
       return res.status(401).json({
         success: false,
-        message: 'Not authorized to access this route',
-        error: error.message
+        message: 'Not authorized to access this route'
       });
     }
   } catch (error) {
+    console.error('[auth] middleware error:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Server error in authentication',
-      error: error.message
+      message: 'Server error in authentication'
     });
   }
 };
@@ -160,22 +151,3 @@ exports.authorize = (...roles) => {
   };
 };
 
-// Check API key permissions
-exports.checkApiPermission = (permission) => {
-  return (req, res, next) => {
-    // Skip permission check if it's not an API request
-    if (!req.user.isApiRequest) {
-      return next();
-    }
-    
-    // Check if the API key has the required permission
-    if (!req.user.apiKey.permissions[permission]) {
-      return res.status(403).json({
-        success: false,
-        message: `API key doesn't have ${permission} permission`
-      });
-    }
-    
-    next();
-  };
-};

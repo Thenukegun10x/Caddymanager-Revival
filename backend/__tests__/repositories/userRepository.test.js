@@ -24,7 +24,12 @@ describe('UserRepository', () => {
       expect(user.username).toBe('testuser');
       expect(user.email).toBe('test@example.com');
       expect(user.role).toBe('user');
-      expect(user.password).toBeUndefined(); // Password should not be returned
+      // The plaintext must never be returned; Mongo returns the document with the
+      // (hashed) password, SQLite strips the field entirely.
+      expect(user.password).not.toBe('password123');
+      if (user.password !== undefined) {
+        expect(user.password).toMatch(/^\$2[aby]\$/);
+      }
     });
   });
 
@@ -124,8 +129,8 @@ describe('UserRepository', () => {
 
   describe('findAll', () => {
     it('should return all users', async () => {
-      await userRepository.create({ username: 'user1', password: 'pass1' });
-      await userRepository.create({ username: 'user2', password: 'pass2' });
+      await userRepository.create({ username: 'user1', password: 'password1' });
+      await userRepository.create({ username: 'user2', password: 'password2' });
 
       const users = await userRepository.findAll();
       

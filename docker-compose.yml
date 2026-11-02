@@ -1,24 +1,9 @@
 services:
-  # MongoDB database for persistent storage (optional - SQLite is used by default)
-  mongodb:
-    image: mongo:8.0
-    container_name: caddymanager-mongodb
-    restart: unless-stopped
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=mongoadmin
-      - MONGO_INITDB_ROOT_PASSWORD=someSecretPassword  # Change for production!
-    ports:
-      - "27017:27017"  # Expose for local dev, remove for production
-    volumes:
-      - mongodb_data:/data/db
-    networks:
-      - caddymanager
-    profiles:
-      - mongodb  # Use 'docker-compose --profile mongodb up' to include MongoDB
-
   # Backend API server
   backend:
-    image: caddymanager/caddymanager-backend:latest
+    # Hardened Revival images (Docker Hub). Upstream caddymanager/* is unmaintained + unpatched.
+    # `latest` = phase-1 hardened build (digest 26ec6c3a, 2026-11-02); pin by digest for prod if desired.
+    image: conormorris/caddymanager-backend:latest
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -27,9 +12,10 @@ services:
       DB_ENGINE: sqlite  # Options: 'sqlite' or 'mongodb'
       # SQLite Configuration (used when DB_ENGINE=sqlite)
       SQLITE_DB_PATH: /app/data/caddymanager.sqlite
-      # MongoDB Configuration (used when DB_ENGINE=mongodb)
-      MONGODB_URI: "mongodb://mongoadmin:someSecretPassword@mongodb:27017/caddymanager?authSource=admin"
-      CORS_ORIGIN: "http://localhost:80"
+      # MongoDB Configuration (only used when DB_ENGINE=mongodb). Supply the full
+      # URI from .env — no credentials are baked into this file.
+      MONGODB_URI: "${MONGODB_URI:-}"
+      CORS_ORIGIN: "http://localhost,http://localhost:80"
       LOG_LEVEL: debug
       CADDY_SANDBOX_URL: "http://localhost:2019"
       PING_INTERVAL: "30000"
@@ -37,8 +23,11 @@ services:
       AUDIT_LOG_MAX_SIZE_MB: "100"
       AUDIT_LOG_RETENTION_DAYS: "90"
       METRICS_HISTORY_MAX: "1000"  # Optional: max number of in-memory metric history snapshots to keep
-      JWT_SECRET: "your_jwt_secret_key_here"  # Change for production!
+      # Required: set JWT_SECRET in .env (openssl rand -hex 32). Fails closed if unset.
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}"
       JWT_EXPIRATION: "24h"
+      # Required only on first boot (empty users table); app fails closed otherwise
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
     # Backend is now only accessible through frontend proxy
     volumes:
       - sqlite_data:/app/data  # SQLite database storage
@@ -47,7 +36,7 @@ services:
 
   # Frontend web UI
   frontend:
-    image: caddymanager/caddymanager-frontend:latest
+    image: conormorris/caddymanager-frontend:latest
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:
@@ -66,13 +55,15 @@ networks:
     driver: bridge
 
 volumes:
-  mongodb_data:  # Only used when MongoDB profile is active
   sqlite_data:   # SQLite database storage
 
 # Notes:
 # - SQLite is the default database engine - no additional setup required!
-# - To use MongoDB instead, set DB_ENGINE=mongodb and start with: docker-compose --profile mongodb up
-# - For production, use strong passwords and consider secrets management.
+# - To use the bundled MongoDB, set DB_ENGINE=mongodb, MONGODB_URI and
+#   MONGO_PASSWORD in .env, then:
+#     docker compose -f docker-compose.yml -f docker-compose.mongodb.yml up -d
+#   (the MongoDB port is bound to 127.0.0.1 only)
+# - For production, use strong passwords and a secrets manager.
 # - The backend uses SQLite by default, storing data in a persistent volume.
 # - The frontend proxies all /api/* requests to the backend service.
 # - Backend is not directly exposed - all API access goes through the frontend proxy.

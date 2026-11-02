@@ -1,11 +1,12 @@
 const express = require('express');
 const buildInfoController = require('../controllers/buildInfoController');
 const { protect } = require('../middleware/authMiddleware');
+const { enforceApiKeyPermissions } = require('../middleware/apiKeyPermissions');
 
 const router = express.Router();
 
 // Protect build info — was public (H1)
-router.use(protect);
+router.use(protect, enforceApiKeyPermissions);
 
 /**
  * @swagger

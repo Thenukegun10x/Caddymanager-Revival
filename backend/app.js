@@ -10,10 +10,13 @@ const { connectToMongo, disconnectFromMongo } = require('./services/mongoService
 const { connectToSQLite } = require('./services/sqliteService');
 const pingService = require('./services/pingService');
 const routes = require('./router');
+const { sendError, scrubErrorResponses } = require('./utils/httpError');
 
-// Fail fast if JWT_SECRET not set in non-test (covers AGENTS.md C1)
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
-  console.error('FATAL: JWT_SECRET must be set — refusing to boot with insecure default');
+// Fail fast if JWT_SECRET is missing, short, or a known placeholder (C1)
+try {
+  require('./utils/jwtSecret').getJwtSecret();
+} catch (error) {
+  console.error(`FATAL: ${error.message}`);
   process.exit(1);
 }
 
@@ -25,8 +28,9 @@ const PORT = process.env.PORT || 3000;
 
 // Select and connect to the configured database engine
 const DB_ENGINE = process.env.DB_ENGINE || 'sqlite';
+let dbReady = Promise.resolve();
 if (DB_ENGINE === 'mongodb') {
-  connectToMongo();
+  dbReady = connectToMongo();
   console.log('Using MongoDB as the database engine.');
 } else if (DB_ENGINE === 'sqlite') {
   connectToSQLite();
@@ -51,11 +55,13 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(helmet({ contentSecurityPolicy: false, hsts: { maxAge: 31536000, includeSubDomains: true } }));
+// Never echo internal error detail from production responses (H6)
+app.use(scrubErrorResponses);
 // Rate limiting — generous in test, strict in prod (AGENTS.md §7 H7)
 const isTest = process.env.NODE_ENV === 'test';
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many login attempts, try later' },
@@ -81,17 +87,18 @@ app.use('/api/v1/caddy/test-connection', testConnLimiter);
 app.use('/api/v1/', apiLimiter);
 app.use(express.json({ limit: '200kb' }));
 app.use(express.text({ limit: '512kb', type: 'text/plain' }));
-app.use(express.urlencoded({ extended: true, limit: '200kb' }));
-// Only verbose logging in development
-if (process.env.NODE_ENV !== 'production') {
+// No express.urlencoded: the API is JSON/text only (M1, smaller parser surface)
+// Only log requests in explicit development mode (L1)
+if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// Swagger API Documentation UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, { explorer: true }));
+// Swagger API Documentation UI — admin only (H8): the spec enumerates every route
+const { protect, authorize } = require('./middleware/authMiddleware');
+app.use('/api-docs', protect, authorize('admin'), swaggerUi.serve, swaggerUi.setup(swaggerSpecs, { explorer: true }));
 
-// Expose the Swagger JSON schema for frontend consumption
-app.get('/api/v1/docs/swagger.json', (req, res) => {
+// Expose the Swagger JSON schema for frontend consumption (admin only)
+app.get('/api/v1/docs/swagger.json', protect, authorize('admin'), (req, res) => {
   res.json(swaggerSpecs);
 });
 
@@ -106,17 +113,15 @@ console.log(`Ping service initialized: ${JSON.stringify(pingServiceStatus)}`);
 try {
   const auditService = require('./services/auditService');
   auditService.cleanupOldLogs().catch(()=>{});
-  setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000);
+  // unref: background maintenance must never hold the process open (Jest/CI open-handle hang)
+  setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000).unref?.();
 } catch {}
 
-// Global error handler
+// Global error handler — generic message + correlation id (H6)
 app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
+  const status = err.status || err.statusCode || 500;
+  const message = status < 500 && err.message ? err.message : 'Internal Server Error';
+  sendError(req, res, status, message, err);
 });
 
 // Catch 404 and forward to error handler
@@ -129,9 +134,14 @@ app.use((req, res) => {
 
 // Start the server only if not in test environment
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Caddy Manager API server listening on port ${PORT}`);
-    console.log(`Ping service is running: ${pingService.getPingServiceStatus().running}`);
+  dbReady.then(() => {
+    app.listen(PORT, () => {
+      console.log(`Caddy Manager API server listening on port ${PORT}`);
+      console.log(`Ping service is running: ${pingService.getPingServiceStatus().running}`);
+    });
+  }).catch((error) => {
+    console.error(`FATAL: database connection failed: ${error.message}`);
+    process.exit(1);
   });
 }
 

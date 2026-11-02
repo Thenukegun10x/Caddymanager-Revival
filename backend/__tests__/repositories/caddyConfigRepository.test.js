@@ -1,8 +1,15 @@
 const caddyConfigRepository = require('../../repositories/caddyConfigRepository');
+const mongoose = require('mongoose');
+
+const isMongo = process.env.DB_ENGINE === 'mongodb';
+const serverId1 = isMongo ? new mongoose.Types.ObjectId() : 'server1';
+const serverId2 = isMongo ? new mongoose.Types.ObjectId() : 'server2';
+const queryServerId = isMongo ? new mongoose.Types.ObjectId() : 'test-server-123';
+const missingConfigId = isMongo ? new mongoose.Types.ObjectId() : 99999;
 
 describe('CaddyConfigRepository', () => {
   const mockConfig = {
-    servers: ['server1', 'server2'],
+    servers: [serverId1, serverId2],
     name: 'Test Configuration',
     format: 'json',
     jsonConfig: {
@@ -29,11 +36,7 @@ describe('CaddyConfigRepository', () => {
     jest.clearAllMocks();
   });
 
-  describe('SQLite Engine', () => {
-    beforeAll(() => {
-      process.env.DB_ENGINE = 'sqlite';
-    });
-
+  describe('Repository operations', () => {
     test('should create a new configuration', async () => {
       const result = await caddyConfigRepository.create(mockConfig);
       
@@ -68,7 +71,7 @@ describe('CaddyConfigRepository', () => {
     });
 
     test('should return null when configuration not found', async () => {
-      const found = await caddyConfigRepository.findById(99999);
+      const found = await caddyConfigRepository.findById(missingConfigId);
       expect(found).toBeNull();
     });
 
@@ -110,11 +113,11 @@ describe('CaddyConfigRepository', () => {
 
     test('should find configurations with query', async () => {
       // Create a configuration with specific server
-      const configWithServer = { ...mockConfig, servers: ['test-server-123'] };
+      const configWithServer = { ...mockConfig, servers: [queryServerId] };
       await caddyConfigRepository.create(configWithServer);
       
       // Find configurations for that server
-      const results = await caddyConfigRepository.find({ servers: 'test-server-123' });
+      const results = await caddyConfigRepository.find({ servers: queryServerId });
       
       expect(Array.isArray(results)).toBe(true);
     });

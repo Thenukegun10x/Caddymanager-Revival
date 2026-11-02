@@ -23,6 +23,8 @@ const caddyConfigRepository = {
    * @returns {Promise<Array>} - Array of configurations
    */
   async findAll({ limit = 100, offset = 0 } = {}) {
+    limit = Math.max(1, parseInt(limit, 10) || 100);
+    offset = Math.max(0, parseInt(offset, 10) || 0);
     if (typeof CaddyConfigModel.find === 'function') {
       const result = CaddyConfigModel.find({});
       // Check if it's a Mongoose query (has lean method)
@@ -63,15 +65,19 @@ const caddyConfigRepository = {
    */
   async find(query = {}) {
     if (typeof CaddyConfigModel.find === 'function') {
-      const result = CaddyConfigModel.find(query);
+      // `_populate` is a repository option, not a MongoDB field predicate.
+      const { _populate: shouldPopulate, ...mongoFilter } = query;
+      const result = CaddyConfigModel.find(mongoFilter);
       // Check if it's a Mongoose query (has lean method)
       if (result && typeof result.lean === 'function') {
         let mongoQuery = result;
         
         // Check if we need to populate servers
-        if (query._populate) {
+        if (shouldPopulate) {
+          // Ensure the referenced model is registered when this repository is
+          // used independently (e.g. in tests or one-off scripts).
+          require('../models/caddyServers');
           mongoQuery = mongoQuery.populate('servers', 'name');
-          delete query._populate;
         }
         
         return mongoQuery.sort({ createdAt: -1 }).lean();

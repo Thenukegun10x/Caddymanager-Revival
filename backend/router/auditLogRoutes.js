@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const auditLogController = require('../controllers/auditLogController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { enforceApiKeyPermissions } = require('../middleware/apiKeyPermissions');
 
 /**
  * Audit Log Routes
@@ -109,7 +110,7 @@ const { protect, authorize } = require('../middleware/authMiddleware');
  */
 
 // Base route is protected
-router.use(protect);
+router.use(protect, enforceApiKeyPermissions);
 
 /**
  * @swagger
@@ -342,6 +343,9 @@ router.get('/stats', authorize('admin'), auditLogController.getAuditStats);
  *         description: Server error
  */
 router.get('/filters', authorize('admin'), auditLogController.getFilterOptions);
+
+// Verify the append-only SHA-256 audit chain (admin only).
+router.get('/integrity', authorize('admin'), auditLogController.verifyIntegrity);
 
 /**
  * @swagger

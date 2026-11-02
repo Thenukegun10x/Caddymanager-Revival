@@ -33,9 +33,13 @@ describe('CaddyController', () => {
     app = express();
     app.use(express.json());
     
-    // Mock middleware for req.user
+    // Mock middleware for req.user (admin by default; tests override via headers)
     app.use((req, res, next) => {
-      req.user = { id: 'test-user-id', username: 'testuser' };
+      req.user = {
+        id: req.headers['x-test-user'] || 'test-user-id',
+        username: 'testuser',
+        role: req.headers['x-test-role'] || 'admin'
+      };
       req.ip = '127.0.0.1';
       next();
     });

@@ -1,8 +1,15 @@
 const express = require('express');
 const router = express.Router();
+
+// Auth responses carry credentials/user data — never cache them (M12)
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/authMiddleware');
-const { validate, loginSchema } = require('../utils/validate');
+const { rejectApiKey } = require('../middleware/apiKeyPermissions');
+const { validate, loginSchema, changePasswordSchema, updateProfileSchema, createUserSchema } = require('../utils/validate');
 
 /**
  * @swagger
@@ -70,10 +77,10 @@ const { validate, loginSchema } = require('../utils/validate');
  *         description: Server error
  */
 router.post('/login', validate(loginSchema), authController.login);
-router.post('/logout', authController.logout);
+router.post('/logout', protect, rejectApiKey, authController.logout);
 
-// Protected routes - require authentication
-router.use(protect);
+// Protected routes - require authentication; API keys may not manage users/credentials
+router.use(protect, rejectApiKey);
 
 /**
  * @swagger
@@ -159,7 +166,7 @@ router.get('/me', authController.getCurrentUser);
  *       500:
  *         description: Server error
  */
-router.put('/update-profile', authController.updateProfile);
+router.put('/update-profile', validate(updateProfileSchema), authController.updateProfile);
 
 /**
  * @swagger
@@ -199,7 +206,7 @@ router.put('/update-profile', authController.updateProfile);
  *       500:
  *         description: Server error
  */
-router.put('/change-password', authController.changePassword);
+router.put('/change-password', validate(changePasswordSchema), authController.changePassword);
 
 // Admin only routes
 router.use(authorize('admin'));
@@ -351,7 +358,7 @@ router.put('/update-user-role', authController.updateUserRole);
  *       500:
  *         description: Server error
  */
-router.post('/create-user', authController.createUser);
+router.post('/create-user', validate(createUserSchema), authController.createUser);
 
 /**
  * @swagger

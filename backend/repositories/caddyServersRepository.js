@@ -48,7 +48,7 @@ const caddyServersRepository = {
       const result = await CaddyServersModel.findById(id);
       if (result && typeof result.toObject === 'function') {
         // Mongoose document
-        return result.toObject();
+        return result.toObject({ virtuals: true });
       }
       // SQLite result or null
       return result;

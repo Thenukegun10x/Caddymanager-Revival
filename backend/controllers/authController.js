@@ -1,20 +1,37 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const userRepository = require('../repositories/userRepository');
 const auditService = require('../services/auditService');
+const { getJwtSecret } = require('../utils/jwtSecret');
+const { sendError } = require('../utils/httpError');
 
-// Environment variables — fail fast if JWT_SECRET not set (except test); support both JWT_EXPIRES_IN and JWT_EXPIRATION
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'test') return 'test-jwt-secret-for-ci-only-not-for-prod';
-    throw new Error('JWT_SECRET must be set — refusing to sign with insecure default');
-  }
-  return secret;
-}
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'test') {
-  throw new Error('JWT_SECRET environment variable is required');
-}
+// Fail fast if JWT_SECRET is missing/short/placeholder (C1); support both
+// JWT_EXPIRES_IN and JWT_EXPIRATION
+getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRATION || '24h';
+
+// Constant-cost dummy hash so a missing user and a wrong password take the same
+// time (M3 — username enumeration by timing).
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
+
+/**
+ * Cookie policy (M1):
+ * - HTTPS production: __Host- prefix, Secure, SameSite=Strict, Path=/
+ * - plain-HTTP LAN/dev: regular name with Lax, otherwise browsers drop the cookie
+ */
+function authCookie(req) {
+  const isSecure = process.env.NODE_ENV === 'production' &&
+    (req.secure || req.headers['x-forwarded-proto'] === 'https');
+  return {
+    name: isSecure ? '__Host-auth_token' : 'auth_token',
+    options: {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: isSecure ? 'strict' : 'lax',
+      path: '/',
+    },
+  };
+}
 
 // Generate JWT token — enforce HS256, include tokenVersion for rotation
 const generateToken = (userId, tokenVersion = 0) => {
@@ -47,6 +64,9 @@ exports.login = async (req, res) => {
         userAgent: req.headers['user-agent']
       });
       
+      // M3: burn the same bcrypt cost as a real comparison before failing
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+
       return res.status(401).json({ 
         success: false, 
         message: 'Invalid credentials' 
@@ -83,15 +103,9 @@ exports.login = async (req, res) => {
     // Generate token with current tokenVersion
     const token = generateToken(user.id || user._id, user.tokenVersion || 0);
 
-    // Set httpOnly cookie (Secure only on https, else http LAN 192.168... would not send)
-    const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: isSecure,
-      sameSite: isSecure ? 'strict' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000
-    });
+    // Set httpOnly cookie. M1: __Host- + Strict on HTTPS; Lax only for plain-HTTP LAN.
+    const cookie = authCookie(req);
+    res.cookie(cookie.name, token, { ...cookie.options, maxAge: 24 * 60 * 60 * 1000 });
 
     // Log successful login
     await auditService.logAction({
@@ -107,10 +121,10 @@ exports.login = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // Send response (still return token for backwards compat, but frontend should use cookie)
-    res.status(200).json({
+    // Send response. H7: the SPA authenticates via the httpOnly cookie only;
+    // a bearer token in the body is opt-in for CLI/automation use.
+    const body = {
       success: true,
-      token,
       user: {
         id: user.id || user._id,
         username: user.username,
@@ -118,7 +132,11 @@ exports.login = async (req, res) => {
         role: user.role,
         lastLogin: updatedUser ? updatedUser.lastLogin : new Date()
       }
-    });
+    };
+    if (process.env.ALLOW_BEARER_TOKEN === 'true') {
+      body.token = token;
+    }
+    res.status(200).json(body);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -129,14 +147,23 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const isSecure = process.env.NODE_ENV === 'production' && (req.secure || req.headers['x-forwarded-proto'] === 'https');
-  res.clearCookie('auth_token', {
-    httpOnly: true,
-    secure: isSecure,
-    sameSite: isSecure ? 'strict' : 'lax',
-    path: '/'
-  });
-  res.json({ success: true, message: 'Logged out' });
+  try {
+    // M4: revoke every outstanding JWT for this user before clearing the browser
+    // cookie. This makes logout effective even if a token was copied elsewhere.
+    const user = await userRepository.incrementTokenVersion(req.user.id);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Not authorized to access this route' });
+    }
+
+    const cookie = authCookie(req);
+    // Clear both the current and legacy cookie names after server-side revocation.
+    res.clearCookie(cookie.name, cookie.options);
+    res.clearCookie('auth_token', cookie.options);
+    res.clearCookie('__Host-auth_token', { ...cookie.options, secure: true });
+    res.json({ success: true, message: 'Logged out' });
+  } catch (error) {
+    return sendError(req, res, 500, 'Unable to log out', error);
+  }
 };
 
 // Get current user profile
@@ -275,9 +302,10 @@ exports.changePassword = async (req, res) => {
       });
     }
     
-    // Update password and rotate tokenVersion (invalidates old JWTs)
+    // Update password and rotate tokenVersion (invalidates old JWTs).
+    // updatePassword() hashes through the model hook — never persist plaintext (C5).
     const newVersion = (user.tokenVersion || 0) + 1;
-    await userRepository.findByIdAndUpdate(user.id || user._id, { password: newPassword, tokenVersion: newVersion });
+    await userRepository.updatePassword(user.id || user._id, newPassword, newVersion);
     
     // Log password change
     await auditService.logAction({

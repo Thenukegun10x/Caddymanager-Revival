@@ -134,6 +134,43 @@ const userRepository = {
     });
   },
 
+  /**
+   * Set a new password and rotate tokenVersion.
+   * Mongoose must go through save() so the pre-save hash hook runs;
+   * findByIdAndUpdate would otherwise persist the plaintext (C5).
+   */
+  async updatePassword(id, newPassword, tokenVersion) {
+    if (isMongoose()) {
+      const user = await UserModel.findById(id).select('+password');
+      if (!user) return null;
+      user.password = newPassword;
+      if (tokenVersion !== undefined) user.tokenVersion = tokenVersion;
+      await user.save();
+      return user;
+    }
+    const update = { password: newPassword };
+    if (tokenVersion !== undefined) update.tokenVersion = tokenVersion;
+    return UserModel.findByIdAndUpdate(id, update, { new: true });
+  },
+
+  // Revoke all current JWTs for a user by advancing the version atomically.
+  async incrementTokenVersion(id) {
+    if (isMongoose()) {
+      return UserModel.findByIdAndUpdate(
+        id,
+        { $inc: { tokenVersion: 1 } },
+        { new: true }
+      ).lean();
+    }
+
+    const db = require('../services/sqliteService').getDB();
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      'UPDATE users SET tokenVersion = tokenVersion + 1, updatedAt = ? WHERE id = ?'
+    ).run(now, id);
+    return result.changes ? this.findById(id) : null;
+  },
+
   async findByIdAndDelete(id) {
     if (isMongoose()) {
       // Mongoose

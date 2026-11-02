@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
@@ -173,8 +173,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}-backend:latest
             ghcr.io/${{ github.repository }}-backend:${{ steps.package-version.outputs.version }}
-            caddymanager/caddymanager-backend:latest
-            caddymanager/caddymanager-backend:${{ steps.package-version.outputs.version }}
+            conormorris/caddymanager-backend:latest
+            conormorris/caddymanager-backend:${{ steps.package-version.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

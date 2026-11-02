@@ -26,8 +26,9 @@ function getApiClient() {
 
   apiClient.interceptors.request.use(
     (reqConfig) => {
-      // Prefer in-memory token (closure, not window), fallback to legacy localStorage, else rely on httpOnly cookie
-      const token = memoryToken || localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY)
+      // httpOnly cookie is the credential (H7). Only an in-memory token from an
+      // explicit bearer-token login is ever attached; localStorage is never read.
+      const token = memoryToken
       if (token) {
         reqConfig.headers.Authorization = `Bearer ${token}`
       }

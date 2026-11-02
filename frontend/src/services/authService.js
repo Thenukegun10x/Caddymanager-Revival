@@ -6,17 +6,8 @@ import apiService, { setMemoryToken, clearMemoryToken } from './apiService';
 const API_URL = config.API.BASE_URL;
 const AUTH_ENDPOINT = `${API_URL}/auth`;
 
-// Get token from localStorage (fallback, httpOnly cookie is primary — Set F)
-const getToken = () => localStorage.getItem(config.STORAGE.AUTH_TOKEN_KEY);
-
-// Set authorization header — only if token exists (httpOnly path uses withCredentials cookie)
-const setAuthHeader = () => {
-  const token = getToken();
-  if (token) {
-    return { Authorization: `Bearer ${token}` };
-  }
-  return {};
-};
+// H7: credentials come from the httpOnly cookie (withCredentials). There is no
+// localStorage token fallback and no Authorization header built from storage.
 
 // Service methods
 export default {

@@ -1,4 +1,9 @@
 const caddyServersRepository = require('../../repositories/caddyServersRepository');
+const mongoose = require('mongoose');
+
+const isMongo = process.env.DB_ENGINE === 'mongodb';
+const activeConfigId = isMongo ? new mongoose.Types.ObjectId() : 123;
+const missingServerId = isMongo ? new mongoose.Types.ObjectId() : 99999;
 
 describe('CaddyServersRepository', () => {
   const mockServer = {
@@ -17,11 +22,7 @@ describe('CaddyServersRepository', () => {
     jest.clearAllMocks();
   });
 
-  describe('SQLite Engine', () => {
-    beforeAll(() => {
-      process.env.DB_ENGINE = 'sqlite';
-    });
-
+  describe('Repository operations', () => {
     test('should create a new server', async () => {
       const result = await caddyServersRepository.create(mockServer);
       
@@ -53,7 +54,7 @@ describe('CaddyServersRepository', () => {
     });
 
     test('should return null when server not found', async () => {
-      const found = await caddyServersRepository.findById(99999);
+      const found = await caddyServersRepository.findById(missingServerId);
       expect(found).toBeNull();
     });
 
@@ -91,11 +92,11 @@ describe('CaddyServersRepository', () => {
 
     test('should find servers with query', async () => {
       // Create a server with specific activeConfig
-      const serverWithConfig = { ...mockServer, activeConfig: 123 };
+      const serverWithConfig = { ...mockServer, activeConfig: activeConfigId };
       await caddyServersRepository.create(serverWithConfig);
       
       // Find servers with that activeConfig
-      const results = await caddyServersRepository.find({ activeConfig: 123 });
+      const results = await caddyServersRepository.find({ activeConfig: activeConfigId });
       
       expect(Array.isArray(results)).toBe(true);
     });
@@ -109,7 +110,7 @@ describe('CaddyServersRepository', () => {
       expect(exists).toBeTruthy();
       
       // Check non-existence
-      const notExists = await caddyServersRepository.exists({ _id: 99999 });
+      const notExists = await caddyServersRepository.exists({ _id: missingServerId });
       expect(notExists).toBeNull();
     });
 
@@ -131,15 +132,6 @@ describe('CaddyServersRepository', () => {
   });
 
   describe('MongoDB Engine (Mocked)', () => {
-    beforeAll(() => {
-      process.env.DB_ENGINE = 'mongo';
-    });
-
-    afterAll(() => {
-      // Reset to sqlite for other tests
-      process.env.DB_ENGINE = 'sqlite';
-    });
-
     test('should handle MongoDB operations when available', () => {
       // This test would require actual MongoDB connection
       // For now, just test that the repository doesn't crash with mongo engine

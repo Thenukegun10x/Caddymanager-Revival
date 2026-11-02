@@ -3,7 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: caddymanager/caddymanager-backend:latest
+    image: conormorris/caddymanager-backend:latest
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -12,17 +12,20 @@ services:
       - DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
       # SQLite Configuration (used when DB_ENGINE=sqlite)
       - SQLITE_DB_PATH=/app/data/caddymanager.sqlite
-      # MongoDB Configuration (used when DB_ENGINE=mongodb)
-      - MONGODB_URI=mongodb://mongoadmin:someSecretPassword@mongodb:27017/caddymanager?authSource=admin
-      - CORS_ORIGIN=http://localhost:80
+      # MongoDB Configuration (only used when DB_ENGINE=mongodb)
+      - MONGODB_URI=${MONGODB_URI:-}
+      - CORS_ORIGIN=http://localhost,http://localhost:80
       - LOG_LEVEL=debug
       - CADDY_SANDBOX_URL=http://localhost:2019
       - PING_INTERVAL=30000
       - PING_TIMEOUT=2000
       - AUDIT_LOG_MAX_SIZE_MB=100
       - AUDIT_LOG_RETENTION_DAYS=90
-      - JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+      # Required: set JWT_SECRET in .env (openssl rand -hex 32). Fails closed if unset.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
       - JWT_EXPIRATION=24h
+      # Required only on first boot (empty users table); app fails closed otherwise
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     volumes:
       - sqlite_data:/app/data
     networks:
@@ -32,7 +35,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: caddymanager/caddymanager-frontend:latest
+    image: conormorris/caddymanager-frontend:latest
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:

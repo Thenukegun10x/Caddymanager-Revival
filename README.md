@@ -1,12 +1,23 @@
-> **Hardened Revival Fork** — This is `Thenukegun10x/Caddymanager-Revival`, a security-hardened revival of [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (stale since 2026-02-20, `archived:false` but unmaintained). See [`PLAN.md`](./PLAN.md) for audit (Critical SSRF/JWT/SQLi/IDOR) and [`NOTICE.md`](./NOTICE.md) for attribution. Original MIT © 2025 B Stolk.
+> **Hardened & upgraded — the maintained successor to CaddyManager.** `Thenukegun10x/Caddymanager-Revival` takes [`caddymanager/caddymanager`](https://github.com/caddymanager/caddymanager) (dead since 2026-02-20) and closes every finding from the 2026-11-01 security sweep (see [`SECURITY-SWEEP-2026-11-01.md`](./SECURITY-SWEEP-2026-11-01.md)) — JWT fail-closed, SSRF with connect-time DNS pinning, SQL whitelists, per-user object ownership, scoped API keys — plus Docker image hardening. Full audit in [`PLAN.md`](./PLAN.md), attribution in [`NOTICE.md`](./NOTICE.md). Original MIT © 2025 B Stolk.
 >
-> **Status:** Phase 0 baseline forked at `52f69b64`. `main` is hardened stable; `develop` tracks upstream. Do not expose to Internet until `v0.1-hardened.1`. Set strong `JWT_SECRET`!
+> **Images:** Docker Hub [`conormorris/caddymanager-backend`](https://hub.docker.com/r/conormorris/caddymanager-backend) · [`conormorris/caddymanager-frontend`](https://hub.docker.com/r/conormorris/caddymanager-frontend) (multi-arch amd64 + arm64). `latest` = the phase-1 hardened build as of 2026-11-02 (backend digest `26ec6c3a`, frontend `25b45168`); a versioned release tag lands with the `v0.1-hardened.1` merge. `JWT_SECRET` and `ADMIN_PASSWORD` are required (compose fails closed).
 
-# CaddyManager
+# CaddyManager (Revival)
 
 Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack with support for both SQLite and MongoDB databases.
 
-> **Caution:** CaddyManager is in early development. Please _backup your Caddy configurations_ and data before testing. Use at your own risk.
+> **Caution:** CaddyManager is in active development. Please _backup your Caddy configurations_ and data before testing. This fork ships the hardened security model below, but any reverse-proxy control plane should run on a network you control.
+
+## 🔒 What this fork adds over upstream
+
+- **Auth hardening** — JWT fails closed (no fallback secret, `HS256` pinned, `tokenVersion` revocation incl. logout), httpOnly `__Host-` cookie sessions, bcrypt timing equalizer, password policy + linear-time email validation
+- **SSRF shield** — connect-time DNS validation with pinned resolved IPs (ipaddr CIDR checks, full IPv6: ULA/`::`/link-local), metadata always denied, exact-host production allowlist (`ALLOW_PRIVATE_HOSTS`), `maxRedirects: 0`
+- **Object-level RBAC** — servers and configs scoped by `createdBy`; a normal user can no longer read/apply/delete other users' Caddy configs; metrics/build-info/Swagger are admin-gated
+- **Scoped API keys** — SHA-256 at rest, 8-char display prefix, read/write/delete enforced per route, keys barred from auth & key-management endpoints
+- **Verifiable audit log** — SHA-256 hash chain (sequence + prev-hash) with admin integrity endpoint `/api/v1/audit-logs/integrity`
+- **Injection-safe data layer** — column whitelists in every SQLite update path, parameterized throughout, generic error responses with correlation IDs
+- **Edge & transport** — helmet, CORS allowlist (deny by default), rate limits (login/API/test-connection), `Cache-Control: no-store` on auth, no `v-html`/`eval` in the SPA, CSP without `unsafe-eval`
+- **Supply chain** — production images carry prod-deps only, non-root UID 10001, pinned Actions, `npm audit` blocking at HIGH in CI, Trivy fs gates, dual-engine (SQLite + MongoDB) jest suites
 
 
 ---
@@ -26,7 +37,7 @@ Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack
 - **API Key Management:**
   - Generate and revoke API keys for programmatic access.
 - **Audit Logging:**
-  - Track all user and system actions for security and compliance.
+  - Track all user and system actions with a SHA-256 hash chain; admins can verify it at `/api/v1/audit-logs/integrity`.
 - **Real-Time Status:**
   - Live server health checks and status updates.
 - **Integrated Swagger API Docs:**
@@ -37,36 +48,31 @@ Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack
 ---
 
 ## 📢 Status
-This project is in active development, gearing up for a v0.1 release. Feedback and testing are appreciated!
+Phase 1 hardening complete and CI-verified on [`PR #1`](https://github.com/Thenukegun10x/Caddymanager-Revival/pull/1) → `main`; first tagged release `v0.1-hardened.1` (and `latest` image republication) lands with that merge. `develop` tracks upstream for future syncs — upstream is unmaintained, so this fork is the primary source.
 
 ---
 
+## 🚀 Quick start (Docker Hub images)
+
+```bash
+# .env next to docker-compose.yml:
+#   JWT_SECRET=$(openssl rand -hex 32)   REQUIRED
+#   ADMIN_PASSWORD=<12+ chars>           REQUIRED on first boot
+docker compose pull && docker compose up -d
+# then login at http://localhost as admin:<ADMIN_PASSWORD>
+```
+
 ## 🐳 Docker Compose Example
 
-Below is the updated `docker-compose.yml` for running both backend and frontend. CaddyManager uses SQLite by default for zero-configuration setup, but you can optionally use MongoDB:
+The `docker-compose.yml` below runs both backend and frontend from the Revival images. SQLite is the default; MongoDB is optional via the overlay:
 
 ```yaml
 services:
-  # MongoDB database for persistent storage (optional - SQLite is used by default)
-  mongodb:
-    image: mongo:8.0
-    container_name: caddymanager-mongodb
-    restart: unless-stopped
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=mongoadmin
-      - MONGO_INITDB_ROOT_PASSWORD=someSecretPassword  # Change for production!
-    ports:
-      - "27017:27017"  # Expose for local dev, remove for production
-    volumes:
-      - mongodb_data:/data/db
-    networks:
-      - caddymanager
-    profiles:
-      - mongodb  # Use 'docker-compose --profile mongodb up' to include MongoDB
-
   # Backend API server
   backend:
-    image: caddymanager/caddymanager-backend:latest
+    # conormorris/* = hardened Revival builds (this fork). Upstream caddymanager/* is dead + unpatched.
+    # `latest` = phase-1 hardened build (2026-11-02). Tags: https://hub.docker.com/r/conormorris/caddymanager-backend/tags
+    image: conormorris/caddymanager-backend:latest
     container_name: caddymanager-backend
     restart: unless-stopped
     environment:
@@ -75,9 +81,9 @@ services:
       - DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
       # SQLite Configuration (used when DB_ENGINE=sqlite)
       - SQLITE_DB_PATH=/app/data/caddymanager.sqlite
-      # MongoDB Configuration (used when DB_ENGINE=mongodb)
-      - MONGODB_URI=mongodb://mongoadmin:someSecretPassword@mongodb:27017/caddymanager?authSource=admin
-      - CORS_ORIGIN=http://localhost:80
+      # MongoDB Configuration (only when DB_ENGINE=mongodb) — set the full URI in .env
+      - MONGODB_URI=${MONGODB_URI:-}
+      - CORS_ORIGIN=http://localhost,http://localhost:80
       - LOG_LEVEL=debug
       - CADDY_SANDBOX_URL=http://localhost:2019
       - PING_INTERVAL=30000
@@ -85,8 +91,11 @@ services:
       - AUDIT_LOG_MAX_SIZE_MB=100
       - AUDIT_LOG_RETENTION_DAYS=90
       - METRICS_HISTORY_MAX=1000  # Optional: max number of in-memory metric history snapshots to keep
-      - JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+      # REQUIRED in .env: openssl rand -hex 32. Compose fails closed if unset.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
       - JWT_EXPIRATION=24h
+      # REQUIRED on first boot when the users table is empty (12+ chars)
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     # Backend is now only accessible through frontend proxy
     volumes:
       - sqlite_data:/app/data  # SQLite database storage
@@ -95,7 +104,7 @@ services:
 
   # Frontend web UI
   frontend:
-    image: caddymanager/caddymanager-frontend:latest
+    image: conormorris/caddymanager-frontend:latest
     container_name: caddymanager-frontend
     restart: unless-stopped
     depends_on:
@@ -114,13 +123,13 @@ networks:
     driver: bridge
 
 volumes:
-  mongodb_data:  # Only used when MongoDB profile is active
   sqlite_data:   # SQLite database storage
 
 # Notes:
 # - SQLite is the default database engine - no additional setup required!
-# - To use MongoDB instead, set DB_ENGINE=mongodb and start with: docker-compose --profile mongodb up
-# - For production, use strong passwords and consider secrets management.
+# - To use the bundled MongoDB, set DB_ENGINE, MONGODB_URI and MONGO_PASSWORD in
+#   .env and run: docker compose -f docker-compose.yml -f docker-compose.mongodb.yml up -d
+# - For production, use strong passwords and a secrets manager.
 # - The backend uses SQLite by default, storing data in a persistent volume.
 # - The frontend proxies all /api/* requests to the backend service.
 # - Backend is not directly exposed - all API access goes through the frontend proxy.
@@ -152,16 +161,22 @@ DB_ENGINE=sqlite  # Options: 'sqlite' or 'mongodb'
 # SQLite Configuration (used when DB_ENGINE=sqlite)
 SQLITE_DB_PATH=./caddymanager.sqlite
 # MongoDB Configuration (used when DB_ENGINE=mongodb)
-MONGODB_URI=mongodb://mongoadmin:someSecretPassword@localhost:27017/caddymanager?authSource=admin
+MONGODB_URI=mongodb://<user>:<password>@localhost:27017/caddymanager?authSource=admin
 CORS_ORIGIN=http://localhost:5173
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
+ALLOW_PRIVATE_HOSTS= # exact private Caddy target hostnames, comma-separated
+ALLOW_PRIVATE_IPS=false # non-production/test only; ignored in production
 PING_INTERVAL=30000
 PING_TIMEOUT=2000
 AUDIT_LOG_MAX_SIZE_MB=100
 AUDIT_LOG_RETENTION_DAYS=90
-JWT_SECRET=your_jwt_secret_key_here  # Change for production!
+# REQUIRED: 32+ chars (openssl rand -hex 32). The backend refuses to boot otherwise.
+JWT_SECRET=
 JWT_EXPIRATION=24h
+ALLOW_BEARER_TOKEN=false
+# REQUIRED on first boot with an empty users table (12+ chars)
+ADMIN_PASSWORD=
 ```
 - `PORT`: Port for the backend server.
 - `DB_ENGINE`: Database engine to use (`sqlite` or `mongodb`). Defaults to `sqlite`.
@@ -170,12 +185,14 @@ JWT_EXPIRATION=24h
 - `CORS_ORIGIN`: Allowed origin for frontend requests - should be the url of your frontend.
 - `LOG_LEVEL`: Logging verbosity.
 - `CADDY_SANDBOX_URL`: URL for the Caddy sandbox server (for testing) and/or validating configs.
+- `ALLOW_PRIVATE_HOSTS`: Exact private target hostnames explicitly trusted in production; their DNS results are still checked and metadata/link-local destinations are denied.
+- `ALLOW_PRIVATE_IPS`: Broad private-target opt-in for development/tests only; ignored in production.
 - `PING_INTERVAL` / `PING_TIMEOUT`: Health check intervals (ms).
 - `AUDIT_LOG_MAX_SIZE_MB` / `AUDIT_LOG_RETENTION_DAYS`: Audit log settings.
 - `METRICS_HISTORY_MAX`: Optional max number of in-memory metric history snapshots to keep (default: 1000).
 - `JWT_SECRET` / `JWT_EXPIRATION`: JWT credential settings
 
-> **Note:** The default CaddyManager user when first creating the app is `admin` with password `caddyrocks`. You can change this after logging in.
+> **Note:** On first boot, set `ADMIN_PASSWORD` (12+ characters) in `.env` before starting the backend. The bootstrap admin is `admin` with that password. The old public `caddyrocks` default has been removed.
 
 > **Tip:** Copy `.env.example` to `.env` in each directory and adjust values as needed for your environment.
 
@@ -189,7 +206,7 @@ CaddyManager supports two database engines:
 - **Zero Configuration**: Works out of the box, no setup required
 - **Single File**: All data stored in a single `.sqlite` file
 - **Perfect for**: Small to medium deployments, development, testing
-- **Automatic Setup**: Creates admin user (`admin`/`caddyrocks`) on first run
+- **Automatic Setup**: Creates the `admin` user from `ADMIN_PASSWORD` on first run (no public default)
 
 ### MongoDB
 - **Scalable**: Better for high-traffic, multi-user environments
@@ -259,8 +276,8 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/YOUR_USERNAME/caddymanager.git
-   cd caddymanager
+   git clone https://github.com/Thenukegun10x/Caddymanager-Revival.git
+   cd Caddymanager-Revival
    ```
 2. **Install dependencies:**
    ```sh
@@ -280,7 +297,8 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
      cd frontend && npm run dev
      ```
 5. **Login:**
-   - Default admin credentials: `admin` / `caddyrocks`
+   - Admin username: `admin`
+   - Password: the `ADMIN_PASSWORD` you set in `.env`
 
 ---
 
@@ -290,7 +308,7 @@ For local testing with real Caddy servers, see [`development/USAGE.md`](developm
    - Open your browser and go to `http://localhost` (or the address where your frontend is running).
 
 2. **Sign In:**
-   - Log in using the default admin credentials (`admin` / `caddyrocks`).
+   - Log in as `admin` with the `ADMIN_PASSWORD` you configured.
 
 3. **Add and Manage Servers:**
    - Navigate to the "Servers" section to add, edit, or remove Caddy servers.
@@ -323,5 +341,6 @@ This project is not endorsed by, directly affiliated with, maintained, authorize
 
 Have questions, feedback, or want to contribute? Feel free to reach out:
 
-- Email: [bastian@bastianstolk.com](mailto:bastian@bastianstolk.com)
-- Open an issue or pull request on GitHub
+- Open an issue or pull request on [GitHub](https://github.com/Thenukegun10x/Caddymanager-Revival) — this fork is the active one
+- Security reports: see [`SECURITY.md`](./SECURITY.md) (do not open public issues for vulnerabilities)
+- Upstream attribution: original project by B Stolk ([caddymanager/caddymanager](https://github.com/caddymanager/caddymanager), MIT © 2025), unmaintained since 2026-02-20

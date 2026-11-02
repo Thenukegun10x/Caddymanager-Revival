@@ -159,8 +159,12 @@ class CaddyService {
    * Check the status of all registered Caddy servers
    * @returns {Promise<Object>} - Status results
    */
-  async checkAllServersStatus() {
-    const servers = await caddyServersRepository.find({});
+  async checkAllServersStatus({ serverIds } = {}) {
+    let servers = await caddyServersRepository.find({});
+    if (Array.isArray(serverIds)) {
+      const allowed = new Set(serverIds.map(String));
+      servers = servers.filter(server => allowed.has(String(server._id || server.id)));
+    }
     const results = {
       total: servers.length,
       online: 0,

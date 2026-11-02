@@ -14,6 +14,10 @@ const apiKeySchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  // First 8 chars of the plaintext key, for identification in the UI (H1).
+  keyPrefix: {
+    type: String
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -61,13 +65,19 @@ apiKeySchema.statics.generateKey = function() {
   return crypto.randomBytes(32).toString('hex');
 };
 
+// Only sha256(key) is persisted, so a database dump cannot be replayed (H1).
+function hashKey(key) {
+  return crypto.createHash('sha256').update(String(key)).digest('hex');
+}
+
 // Method to create a new API key for a user
 apiKeySchema.statics.createApiKey = async function(userId, name, permissions = {}, expiration = null) {
   const key = this.generateKey();
   
   const apiKeyData = {
     name,
-    key,
+    key: hashKey(key),
+    keyPrefix: key.slice(0, 8),
     userId,
     permissions: {
       ...{ read: true, write: false, delete: false },
@@ -79,12 +89,15 @@ apiKeySchema.statics.createApiKey = async function(userId, name, permissions = {
     apiKeyData.expiresAt = expiration;
   }
   
-  return await this.create(apiKeyData);
+  const apiKey = await this.create(apiKeyData);
+  // Returned once so the caller can display it; not part of the schema/model.
+  apiKey.plaintextKey = key;
+  return apiKey;
 };
 
 // Method to validate an API key
 apiKeySchema.statics.validateApiKey = async function(key) {
-  const apiKey = await this.findOne({ key, isActive: true });
+  const apiKey = await this.findOne({ key: hashKey(key), isActive: true });
   
   if (!apiKey) {
     return null;
