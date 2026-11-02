@@ -117,8 +117,10 @@ jobs:
         working-directory: backend
 
       - name: Set lowercase image name
+        id: image
         run: |
-          echo "DOCKER_IMAGE_NAME=$(echo ${{ github.repository }}-backend | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          # ghcr rejects uppercase repository names; github.repository keeps the original case
+          echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Log in to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -140,7 +142,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}-backend
           tags: |
             type=raw,value=${{ steps.package-version.outputs.version }}-next
             type=raw,value=next
@@ -165,8 +167,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository }}-backend:next
-            ghcr.io/${{ github.repository }}-backend:${{ steps.package-version.outputs.version }}-next
+            ghcr.io/${{ steps.image.outputs.name }}-backend:next
+            ghcr.io/${{ steps.image.outputs.name }}-backend:${{ steps.package-version.outputs.version }}-next
             conormorris/caddymanager-backend:next
             conormorris/caddymanager-backend:${{ steps.package-version.outputs.version }}-next
           labels: ${{ steps.meta.outputs.labels }}
