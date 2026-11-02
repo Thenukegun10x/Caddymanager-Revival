@@ -113,7 +113,8 @@ console.log(`Ping service initialized: ${JSON.stringify(pingServiceStatus)}`);
 try {
   const auditService = require('./services/auditService');
   auditService.cleanupOldLogs().catch(()=>{});
-  setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000);
+  // unref: background maintenance must never hold the process open (Jest/CI open-handle hang)
+  setInterval(()=> auditService.cleanupOldLogs().catch(()=>{}), 24*60*60*1000).unref?.();
 } catch {}
 
 // Global error handler — generic message + correlation id (H6)

@@ -190,6 +190,8 @@ const startPingService = () => {
     pingInProgress = true;
     try { await pingAllServers(); } finally { pingInProgress = false; }
   }, intervalMs);
+  // unref: the HTTP server owns process lifetime; this timer must not hold CI/Jest open
+  pingInterval.unref?.();
   
   // Run an initial ping immediately (guarded)
   (async () => {
