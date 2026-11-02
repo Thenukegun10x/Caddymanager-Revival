@@ -138,8 +138,10 @@ jobs:
           cat frontend/CHANGELOG.md
 
       - name: Set lowercase image name
+        id: image
         run: |
-          echo "DOCKER_IMAGE_NAME=$(echo ${{ github.repository }}-frontend | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          # ghcr rejects uppercase repository names; github.repository keeps the original case
+          echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Log in to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -161,7 +163,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}-frontend
           tags: |
             type=raw,value=${{ steps.package-version.outputs.version }}
             type=raw,value=latest
@@ -187,8 +189,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository }}-frontend:latest
-            ghcr.io/${{ github.repository }}-frontend:${{ steps.package-version.outputs.version }}
+            ghcr.io/${{ steps.image.outputs.name }}-frontend:latest
+            ghcr.io/${{ steps.image.outputs.name }}-frontend:${{ steps.package-version.outputs.version }}
             conormorris/caddymanager-frontend:latest
             conormorris/caddymanager-frontend:${{ steps.package-version.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}
