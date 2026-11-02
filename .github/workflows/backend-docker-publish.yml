@@ -6,6 +6,9 @@ on:
       - 'main'
     tags:
       - 'v*.*.*'
+    # docs-only commits should not rebuild/repush images (tag pushes ignore path filters)
+    paths-ignore:
+      - '**.md'
 
 env:
   REGISTRY: ghcr.io

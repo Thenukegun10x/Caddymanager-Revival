@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'develop'
+    # docs-only commits should not rebuild/repush images
+    paths-ignore:
+      - '**.md'
 
 env:
   REGISTRY: ghcr.io
