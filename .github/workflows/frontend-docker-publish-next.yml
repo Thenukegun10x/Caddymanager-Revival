@@ -155,7 +155,7 @@ jobs:
             org.opencontainers.image.created=${{ steps.build-meta.outputs.build-date }}
             caddymanager.build.number=${{ steps.build-meta.outputs.build-number }}
             caddymanager.build.branch=${{ github.ref_name }}
-            caddymanager.build.commit=${{ steps.build-meta.outputs.commit-sha }}
+            caddymanager.build.commit=${{ steps.build-meta.outputs.build-sha }}
             caddymanager.build.features=${{ steps.changelog.outputs.feature-count }}
             caddymanager.build.fixes=${{ steps.changelog.outputs.fix-count }}
             caddymanager.build.workflow-run=${{ github.run_id }}
@@ -195,7 +195,7 @@ jobs:
           VERSION: ${{ steps.package-version.outputs.version }}
           BUILD_NUMBER: ${{ steps.build-meta.outputs.build-number }}
           REF_NAME: ${{ github.ref_name }}
-          COMMIT_SHA: ${{ steps.build-meta.outputs.commit-sha }}
+          COMMIT_SHA: ${{ steps.build-meta.outputs.build-sha }}
           FEATURE_COUNT: ${{ steps.changelog.outputs.feature-count }}
           FIX_COUNT: ${{ steps.changelog.outputs.fix-count }}
         run: |
@@ -209,4 +209,4 @@ jobs:
           echo "- **Bugs Fixed:** $FIX_COUNT" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### 📋 Full Changelog" >> "$GITHUB_STEP_SUMMARY"
-          cat frontend/CHANGELOG.md >> "$GITHUB_STEP_SUMMARY
+          cat frontend/CHANGELOG.md >> "$GITHUB_STEP_SUMMARY"
