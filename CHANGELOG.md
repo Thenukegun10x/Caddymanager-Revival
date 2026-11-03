@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 Releases are cut with `scripts/release.sh`; see [RELEASING.md](RELEASING.md).
 
+## [0.1.1] - 2026-11-03
+
+### Added
+- add opt-in agent surface
+- tag-driven release flow with dual-arch gate
+
+### Fixed
+- stop doubling the image name when templating tags
+
+### Other
+- point Last verified at current main (6484ba32)
+- record the v0.1-hardened.1 release state in AGENTS.md
+
 ## [0.1.0] - 2026-11-02
 
 First hardened release of the Revival fork. Built from `3354a206`, published as
