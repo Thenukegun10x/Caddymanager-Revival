@@ -492,6 +492,32 @@ router.post('/configs/:configId/apply', caddyController.applyConfig);
 
 /**
  * @swagger
+ * /api/v1/caddy/configs/{configId}/validate:
+ *   get:
+ *     summary: Validate a stored configuration against its Caddy server(s)
+ *     tags: [Server Configuration]
+ *     parameters:
+ *       - name: configId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: serverIds
+ *         in: query
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Comma-separated server IDs; defaults to the config's servers
+ *     responses:
+ *       200:
+ *         description: Validation result (valid true/false per server)
+ *       404:
+ *         description: Configuration not found
+ */
+router.get('/configs/:configId/validate', caddyController.validateConfigForServers);
+
+/**
+ * @swagger
  * /api/v1/caddy/configs/{configId}:
  *   get:
  *     summary: Get a specific configuration by ID

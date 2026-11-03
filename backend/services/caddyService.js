@@ -1,6 +1,7 @@
 const axios = require('axios');
 const caddyServersRepository = require('../repositories/caddyServersRepository');
 const caddyConfigRepository = require('../repositories/caddyConfigRepository');
+const { digest } = require('../utils/jsonPatch');
 require('dotenv').config();
 const { assertSafeServerConfig, buildSafeBaseUrl, assertSafeAdminApiPath, axiosSafeOpts } = require('../utils/ssrf');
 
@@ -172,7 +173,7 @@ class CaddyService {
       unknown: 0,
       details: []
     };
-    
+
     for (const server of servers) {
       try {
         await this.testServerConnection(server);
@@ -464,12 +465,45 @@ volumes:
   }
 
   /**
+   * Turn an axios/Caddy failure into a single human-readable string, preferring
+   * the error Caddy actually returned over axios' generic message.
+   * @param {Error} error
+   * @returns {string}
+   */
+  describeCaddyError(error) {
+    if (!error) return 'Unknown error';
+    if (error.response && error.response.data) {
+      const data = error.response.data;
+      if (typeof data === 'string') return data;
+      if (data.error) return data.error;
+      if (data.message) return data.message;
+      try {
+        return JSON.stringify(data);
+      } catch {
+        return error.message;
+      }
+    }
+    return error.message || 'Unknown error';
+  }
+
+  /**
    * Apply a stored configuration to one or more servers
    * @param {string} configId - Configuration ID
    * @param {Array} serverIds - Optional array of server IDs (if not provided, uses all servers in the config)
+   * @param {Object} options - { dryRun: boolean } validates without changing anything
    * @returns {Promise<Object>} - Result of the operation
    */
-  async applyConfigToServer(configId, serverIds = null) {
+  async applyConfigToServer(configId, serverIds = null, options = {}) {
+    // A dry run validates against every target but never writes to Caddy or the
+    // database. It exists so an agent (or the UI) can prove a config is
+    // acceptable before changing a live server.
+    const dryRun = options.dryRun === true;
+    const expectedLiveDigest = options.expectedLiveDigest;
+    if (expectedLiveDigest !== undefined &&
+        (typeof expectedLiveDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(expectedLiveDigest))) {
+      throw new Error('expectedLiveDigest must be a sha256 digest');
+    }
+
     const config = await caddyConfigRepository.findById(configId);
     if (!config) {
       throw new Error('Configuration not found');
@@ -481,9 +515,13 @@ volumes:
     if (targetServerIds.length === 0) {
       throw new Error('No target servers found for this configuration');
     }
+    if (expectedLiveDigest && targetServerIds.length !== 1) {
+      throw new Error('expectedLiveDigest requires exactly one server');
+    }
     
     const results = {
       success: true,
+      dryRun,
       message: `Configuration "${config.name}" applied to servers`,
       servers: [],
       failed: [],
@@ -491,7 +529,7 @@ volumes:
     };
     
     // Log config data for debugging
-    console.log(`Applying configuration ${config.name} (${config._id}) to ${targetServerIds.length} servers`);
+    console.log(`${dryRun ? 'Validating' : 'Applying'} configuration ${config.name} (${config._id}) to ${targetServerIds.length} servers`);
     
     // Apply to each server
     for (const serverId of targetServerIds) {
@@ -508,9 +546,10 @@ volumes:
         console.log(`Applying to server ${server.name} (${server._id}) at ${server.apiUrl}:${server.apiPort}${server.adminApiPath}`);
         
         // First, validate the configuration against this server
+        let validationResult;
         try {
           console.log(`Validating configuration on ${server.name} before applying...`);
-          const validationResult = await this.validateConfig(server, config.jsonConfig);
+          validationResult = await this.validateConfig(server, config.jsonConfig);
           
           if (!validationResult.isValid) {
             console.error(`Configuration validation failed for server ${server.name}:`, validationResult.message);
@@ -534,12 +573,130 @@ volumes:
         }
         
         const axiosInstance = this.createAxiosInstance(server);
-        
-        // Apply JSON config using the server's configured adminApiPath
-        const result = await axiosInstance.post(server.adminApiPath, config.jsonConfig);
-        
-        console.log(`Successfully applied config to ${server.name}`, result.status);
-        
+
+        if (dryRun) {
+          if (expectedLiveDigest) {
+            try {
+              const live = await axiosInstance.get(server.adminApiPath);
+              const currentDigest = digest(live && live.data);
+              if (currentDigest !== expectedLiveDigest) {
+                results.failed.push({
+                  serverId,
+                  name: server.name,
+                  error: 'Live config changed since it was read',
+                  conflict: true,
+                  expectedLiveDigest,
+                  currentLiveDigest: currentDigest,
+                });
+                continue;
+              }
+            } catch (error) {
+              results.failed.push({
+                serverId,
+                name: server.name,
+                error: `Could not read the live config for the digest check: ${error.message}`,
+              });
+              continue;
+            }
+          }
+          results.servers.push({
+            serverId,
+            name: server.name,
+            status: 'validated',
+            dryRun: true,
+            validationMessage: validationResult.message
+          });
+          continue;
+        }
+
+        // Snapshot the live config before changing anything. Rollback is owned
+        // here (not by callers), so an unreadable snapshot means the apply must
+        // not proceed: there would be no way back.
+        let snapshot;
+        try {
+          const live = await axiosInstance.get(server.adminApiPath);
+          snapshot = live && live.data !== undefined
+            ? JSON.parse(JSON.stringify(live.data))
+            : undefined;
+          if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+            throw new Error('Caddy returned no JSON object for the live configuration');
+          }
+        } catch (snapshotError) {
+          console.error(`Could not snapshot live config on ${server.name}:`, snapshotError.message);
+          results.failed.push({
+            serverId,
+            name: server.name,
+            error: `Could not snapshot the live configuration before applying: ${snapshotError.message}`,
+            rolledBack: false,
+            rollback: 'not-attempted'
+          });
+          continue;
+        }
+
+        // Compare the expected digest to the very snapshot used for rollback,
+        // avoiding a separate-read/apply race at the MCP layer.
+        if (expectedLiveDigest) {
+          const currentLiveDigest = digest(snapshot);
+          if (currentLiveDigest !== expectedLiveDigest) {
+            results.failed.push({
+              serverId,
+              name: server.name,
+              error: 'Live config changed since it was read',
+              conflict: true,
+              expectedLiveDigest,
+              currentLiveDigest,
+            });
+            continue;
+          }
+        }
+
+        try {
+          // Apply JSON config using the server's configured adminApiPath
+          const result = await axiosInstance.post(server.adminApiPath, config.jsonConfig);
+
+          console.log(`Successfully applied config to ${server.name}`, result.status);
+        } catch (error) {
+          console.error(`Failed to apply config to server ${serverId}:`, error.message);
+
+          // Log detailed error information for debugging
+          if (error.response) {
+            console.error(`HTTP Status: ${error.response.status}`);
+            console.error(`Response Headers:`, error.response.headers);
+            console.error(`Response Data:`, error.response.data);
+          } else if (error.request) {
+            console.error(`No response received:`, error.request);
+          } else {
+            console.error(`Error setting up request:`, error.message);
+          }
+
+          // Caddy rejects invalid configs atomically, but a timeout or a
+          // half-applied load is still possible. Restore the snapshot and
+          // report whether the rollback succeeded.
+          let rolledBack = false;
+          let rollbackError;
+          try {
+            await axiosInstance.post(server.adminApiPath, snapshot);
+            rolledBack = true;
+            console.log(`Rolled back ${server.name} to its pre-apply snapshot`);
+          } catch (restoreError) {
+            rollbackError = restoreError.message;
+            console.error(`ROLLBACK FAILED on ${server.name}:`, rollbackError);
+          }
+
+          results.failed.push({
+            serverId,
+            name: server.name,
+            error: this.describeCaddyError(error),
+            statusCode: error.response?.status,
+            httpMethod: 'POST',
+            endpoint: server.adminApiPath,
+            rolledBack,
+            rollbackFailed: !rolledBack,
+            ...(rollbackError ? { rollbackError } : {})
+          });
+          continue;
+        }
+
         // Update the status of all other configs for this server to non-live
         await this.updateOtherConfigurations(serverId, configId);
         
@@ -569,52 +726,36 @@ volumes:
         results.servers.push({
           serverId,
           name: server.name,
-          status: 'success'
+          status: 'success',
+          validationMessage: validationResult.message
         });
       } catch (error) {
         console.error(`Failed to apply config to server ${serverId}:`, error.message);
-        
-        // Log detailed error information for debugging
-        if (error.response) {
-          console.error(`HTTP Status: ${error.response.status}`);
-          console.error(`Response Headers:`, error.response.headers);
-          console.error(`Response Data:`, error.response.data);
-        } else if (error.request) {
-          console.error(`No response received:`, error.request);
-        } else {
-          console.error(`Error setting up request:`, error.message);
-        }
-        
-        // Extract more detailed error message
-        let detailedError = error.message;
-        if (error.response && error.response.data) {
-          if (typeof error.response.data === 'string') {
-            detailedError = error.response.data;
-          } else if (error.response.data.error) {
-            detailedError = error.response.data.error;
-          } else if (error.response.data.message) {
-            detailedError = error.response.data.message;
-          } else {
-            detailedError = JSON.stringify(error.response.data);
-          }
-        }
-        
         results.failed.push({
           serverId,
-          error: detailedError,
-          statusCode: error.response?.status,
-          httpMethod: 'POST',
-          endpoint: server.adminApiPath
+          name: server.name,
+          error: this.describeCaddyError(error)
         });
       }
     }
     
+    // A dry run never mutates the saved config or the server records.
+    if (dryRun) {
+      results.conflict = results.failed.some((failure) => failure.conflict === true);
+      results.success = results.failed.length === 0 && results.servers.length > 0;
+      results.message = results.success
+        ? `Configuration "${config.name}" is valid for ${results.servers.length} server(s). No changes were made.`
+        : `Configuration "${config.name}" failed validation on ${results.failed.length} server(s). No changes were made.`;
+      return results;
+    }
+
     // Save the config with updated status only if at least one server succeeded
     if (results.servers.length > 0) {
       await caddyConfigRepository.save(config);
     }
     
     // Update overall success flag - only consider it a success if ALL servers succeeded
+    results.conflict = results.failed.some((failure) => failure.conflict === true);
     results.success = results.failed.length === 0 && results.servers.length > 0;
     
     if (results.failed.length > 0) {

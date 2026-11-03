@@ -15,6 +15,10 @@ services:
       # MongoDB Configuration (only used when DB_ENGINE=mongodb)
       - MONGODB_URI=${MONGODB_URI:-}
       - CORS_ORIGIN=http://localhost,http://localhost:80
+      # Opt-in MCP agent surface (POST /api/v1/mcp, API key auth). Off by default.
+      - MCP_ENABLED=${MCP_ENABLED:-false}
+      - MCP_ALLOWED_ORIGIN=${MCP_ALLOWED_ORIGIN:-}
+      - MCP_SELF_URL=http://127.0.0.1:3000
       - LOG_LEVEL=debug
       - CADDY_SANDBOX_URL=http://localhost:2019
       - PING_INTERVAL=30000
