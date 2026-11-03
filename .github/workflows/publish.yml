@@ -83,9 +83,7 @@ jobs:
       matrix:
         include:
           - app: backend
-            image: caddymanager-backend
           - app: frontend
-            image: caddymanager-frontend
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -98,12 +96,19 @@ jobs:
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
           SHORT_SHA: ${{ needs.preflight.outputs.short_sha }}
-          APP: ${{ matrix.image }}
+          APP: ${{ matrix.app }}
           SLUG: ${{ steps.slug.outputs.value }}
         run: |
           set -euo pipefail
           dockerhub="conormorris/caddymanager-${APP}"
           ghcr="ghcr.io/${SLUG}-${APP}"
+          # Guard against name templating regressions (e.g. caddymanager-caddymanager-backend).
+          case "$dockerhub$ghcr" in
+            *caddymanager-caddymanager*|*-backend-backend*|*-frontend-frontend*)
+              echo "::error::image name is doubled: $dockerhub / $ghcr"
+              exit 1
+              ;;
+          esac
           refs=()
           if [ "${{ github.ref_type }}" = "tag" ]; then
             minor="${VERSION%.*}"
