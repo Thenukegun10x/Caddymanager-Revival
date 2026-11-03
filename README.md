@@ -48,7 +48,9 @@ Easily manage your Caddy2 servers using a modern web UI, built on the MEVN stack
 ---
 
 ## 📢 Status
-Phase 1 hardening complete and CI-verified on [`PR #1`](https://github.com/Thenukegun10x/Caddymanager-Revival/pull/1) → `main`; first tagged release `v0.1-hardened.1` (and `latest` image republication) lands with that merge. `develop` tracks upstream for future syncs — upstream is unmaintained, so this fork is the primary source.
+Phase 1 hardening complete and CI-verified on [`PR #1`](https://github.com/Thenukegun10x/Caddymanager-Revival/pull/1) → `main`; first release `v0.1-hardened.1`. `develop` tracks upstream for future syncs — upstream is unmaintained, so this fork is the primary source.
+
+Releases follow a single-version, tag-driven flow: `scripts/release.sh` bumps both packages, writes `CHANGELOG.md`, proves native `linux/amd64` + `linux/arm64` builds, then tags; CI publishes and verifies that `:latest` matches the release manifest on both registries. See [RELEASING.md](RELEASING.md) for the runbook and `AGENTS.md` §10 for the mandatory rules.
 
 ---
 

@@ -1,0 +1,264 @@
+name: Publish Images
+
+# One workflow for both apps and every channel. Replaces the four duplicated
+# backend/frontend × stable/next workflows.
+#
+#   develop push      -> :next   + :sha-<commit>
+#   main push         -> :edge   + :sha-<commit>
+#   tag vX.Y.Z        -> :X.Y.Z  + :X.Y + :latest + :stable + :sha-<commit>
+#
+# A release tag only publishes after preflight proves version == tag == main and
+# the CHANGELOG section exists, and only succeeds after the multi-arch manifest
+# and the :latest digest have been verified. See RELEASING.md.
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*.*.*']
+    # docs-only commits should not rebuild :edge/:next (tag pushes ignore path filters)
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false # never cancel a release while it is pushing
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ── Release preflight: invariants that must hold before anything is pushed ──
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      is_release: ${{ steps.meta.outputs.is_release }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      build_date: ${{ steps.meta.outputs.build_date }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # tag ancestry + changelog range
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Compute release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./backend/package.json').version")"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            is_release=true
+          else
+            is_release=false
+          fi
+          {
+            echo "is_release=$is_release"
+            echo "version=$version"
+            echo "short_sha=${GITHUB_SHA:0:8}"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch main for tag ancestry checks
+        if: github.ref_type == 'tag'
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Verify release invariants
+        if: github.ref_type == 'tag'
+        run: scripts/verify-release.sh --tag "${{ github.ref_name }}"
+
+  # ── Build and push both images for amd64 + arm64 ───────────────────────────
+  build:
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: backend
+            image: caddymanager-backend
+          - app: frontend
+            image: caddymanager-frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set lowercase repository slug
+        id: slug
+        run: echo "value=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SHORT_SHA: ${{ needs.preflight.outputs.short_sha }}
+          APP: ${{ matrix.image }}
+          SLUG: ${{ steps.slug.outputs.value }}
+        run: |
+          set -euo pipefail
+          dockerhub="conormorris/caddymanager-${APP}"
+          ghcr="ghcr.io/${SLUG}-${APP}"
+          refs=()
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            minor="${VERSION%.*}"
+            for repo in "$dockerhub" "$ghcr"; do
+              refs+=("$repo:${VERSION}" "$repo:${minor}" "$repo:latest" "$repo:stable" "$repo:sha-${SHORT_SHA}")
+            done
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            for repo in "$dockerhub" "$ghcr"; do
+              refs+=("$repo:edge" "$repo:sha-${SHORT_SHA}")
+            done
+          else
+            for repo in "$dockerhub" "$ghcr"; do
+              refs+=("$repo:next" "$repo:sha-${SHORT_SHA}")
+            done
+          fi
+          {
+            echo "value<<EOF"
+            printf '%s\n' "${refs[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Tags for %s:\n%s\n' "$APP" "$(printf '%s\n' "${refs[@]}")"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build and push (${{ matrix.app }})
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: ./${{ matrix.app }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.value }}
+          labels: |
+            org.opencontainers.image.title=caddymanager-${{ matrix.app }}
+            org.opencontainers.image.version=${{ needs.preflight.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ needs.preflight.outputs.build_date }}
+            caddymanager.build.version=${{ needs.preflight.outputs.version }}
+            caddymanager.build.branch=${{ github.ref_name }}
+            caddymanager.build.commit=${{ needs.preflight.outputs.short_sha }}
+            caddymanager.build.workflow-run=${{ github.run_id }}
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+            BUILD_DATE=${{ needs.preflight.outputs.build_date }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+      - name: Summary (${{ matrix.app }})
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAGS: ${{ steps.tags.outputs.value }}
+        run: |
+          {
+            echo "## ${{ matrix.app }}"
+            echo ""
+            echo "- **Version:** $VERSION"
+            echo "- **Platforms:** linux/amd64, linux/arm64"
+            echo "- **Commit:** ${{ needs.preflight.outputs.short_sha }}"
+            echo ""
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Post-publish gate: both arches present, latest == version ──────────────
+  verify-manifest:
+    needs: [preflight, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Fetch main for tag ancestry checks
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Verify published manifests
+        run: scripts/verify-release.sh --tag "${{ github.ref_name }}" --registry
+
+  # ── GitHub Release from the CHANGELOG section ──────────────────────────────
+  github-release:
+    needs: [preflight, verify-manifest]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "## [" ver "]") == 1) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            echo "::error::CHANGELOG.md has no notes for $VERSION"
+            exit 1
+          fi
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file /tmp/notes.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          fi

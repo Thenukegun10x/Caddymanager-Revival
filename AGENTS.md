@@ -26,6 +26,7 @@ frontend/              Vue 3 + Vite + Pinia + Vue Router, ace-editor
   src/services/        apiService, configService (api_base_url poison risk)
   src/components/configurations/*DataComp.vue  v-html XSS surface
 development/           build-caddy-sandbox.sh, spin-caddy-servers.sh (targets)
+scripts/               release.sh, verify-release.sh, lib/common.sh (release gates)
 docker-compose.yml     pull Docker Hub conormorris/* (prod-like, hardened tag pinned)
 docker-compose.build.yml  build from ./backend, ./frontend (dev)
 docker-compose.test.yml   edge caddy + isolated networks (test, see §3)
@@ -177,6 +178,14 @@ docker run --rm -e NODE_PATH=/usr/src/node-app/node_modules \
   /usr/src/node-app/node_modules/.bin/jest --runInBand --forceExit
 ```
 
+### Release gates (run before any tag)
+```bash
+scripts/verify-release.sh                 # one version, lockfiles, changelog notes
+scripts/verify-release.sh --build         # amd64 local + native arm64 on ubuntuvm, smoke-tested
+scripts/verify-release.sh --tag vX.Y.Z --registry  # published manifests + latest == version
+scripts/release.sh patch --dry-run        # full plan, changes nothing
+```
+
 ### Docker smoke
 ```bash
 docker compose -f docker-compose.build.yml up --build -d
@@ -240,7 +249,7 @@ To add servers in UI: `Servers -> Add Server -> API URL=http://caddy-server-1 (c
 ## 8. Branching & PR
 
 ```
-main (protected, hardened stable, tags v0.1-hardened.*)
+main (protected, hardened stable, release tags vX.Y.Z)
 develop (tracks upstream/main)
 fix/jwt-secret, fix/ssrf-deny, fix/sql-whitelist, fix/rbac ...
 ```
@@ -260,6 +269,66 @@ gh api repos/Thenukegun10x/Caddymanager-Revival --jq '{html_url, fork, parent:{f
 docker compose config # validate merged yml
 ```
 
-**Image registry reality:** primary distribution is **Docker Hub `conormorris/caddymanager-{backend,frontend}`** (multi-arch amd64+arm64). Since the CI revival on 2026-11-02 the publish workflows are the source of truth: a push to `main` (or a `v*.*.*` tag) builds and pushes `:<package-version>`, `:latest` and `:sha-<commit>` to Docker Hub **and** `ghcr.io/thenukegun10x/caddymanager-revival-{backend,frontend}` (public packages). Requires repo secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`; without them the login step fails the job. Registry paths must be lowercase, so the workflows lowercase `github.repository` via a step output — never reference `${{ github.repository }}` directly in an image tag. **Retag rule:** use `docker buildx imagetools create -t dst src` (copies the full manifest index) — never `docker pull && tag && push`, which flattens multi-arch to the local platform (that is how `latest` became arm64-only in September).
+**Image registry reality:** primary distribution is **Docker Hub `conormorris/caddymanager-{backend,frontend}`**, mirrored to public `ghcr.io/thenukegun10x/caddymanager-revival-{backend,frontend}`. Both carry `linux/amd64` + `linux/arm64` manifest indexes. `.github/workflows/publish.yml` is the **only** image publisher (the four old `*-docker-publish*.yml` files were removed): `develop` → `:next`, `main` → `:edge`, tag `vX.Y.Z` → `:X.Y.Z`/`:X.Y`/`:latest`/`:stable`/`:sha-<commit>`. Requires repo secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`; without them the login step fails the job. Registry paths must be lowercase, so the workflow lowercases `github.repository` in a step output — never reference `${{ github.repository }}` directly in an image tag. **Retag rule:** use `docker buildx imagetools create -t dst src` (copies the full manifest index) — never `docker pull && tag && push`, which flattens multi-arch to the local platform (that is how `latest` became arm64-only in September).
+
+---
+
+## 10. Release Rules — MUST / MUST NOT
+
+Releases are cut **only** with `scripts/release.sh` and verified with
+`scripts/verify-release.sh`. Full runbook: [`RELEASING.md`](./RELEASING.md).
+
+### MUST
+
+- **MUST keep one product version.** `backend/package.json`, `frontend/package.json`
+  and both `package-lock.json` files always carry the same `X.Y.Z`. `release-check`
+  in CI fails otherwise.
+- **MUST build both architectures before pushing a release tag.**
+  `linux/amd64` builds locally; `linux/arm64` builds **natively** on
+  `ssh ubuntuvm` (`ARM_HOST` override allowed) and both images must pass a smoke
+  test. QEMU cross-builds are acceptable in PR CI, never for the release gate.
+- **MUST publish `:latest` with every release tag**, pointing at the exact same
+  multi-arch manifest index as `:X.Y.Z`. A release that leaves `:latest` behind
+  is incomplete — `verify-manifest` compares the raw index digests and fails the
+  release if they differ.
+- **MUST verify after publishing:** `scripts/verify-release.sh --tag vX.Y.Z --registry`.
+  This proves amd64+arm64 in Docker Hub **and** GHCR and `latest == version`.
+- **MUST create the GitHub Release** from the `CHANGELOG.md` section for that
+  version (the `github-release` job does this automatically).
+- **MUST tag from `main`, with CI green on the exact commit** and a clean tree.
+- **MUST update `CHANGELOG.md` in the same commit as the bump** (`release.sh`
+  writes the section from conventional commits).
+- **MUST use annotated tags** shaped `vMAJOR.MINOR.PATCH`.
+
+### MUST NOT
+
+- **MUST NOT publish from a feature/fix branch or a dirty working tree.**
+- **MUST NOT move, delete, or reuse a release tag or version.** If a release is
+  broken, cut the next patch.
+- **MUST NOT use `docker pull && docker tag && docker push` to move `:latest`.**
+- **MUST NOT push a release tag created with `--skip-arch-gate`.** That flag
+  exists for rehearsal only; an unverified arm64 image must never ship.
+- **MUST NOT let `:latest` track a branch.** `main` publishes `:edge`; only tags
+  move `:latest`/`:stable`.
+- **MUST NOT add a second publish workflow.** `publish.yml` is the sole publisher.
+
+### Channels
+
+| Trigger | Tags |
+|---------|------|
+| push `develop` | `:next`, `:sha-<commit>` |
+| push `main` | `:edge`, `:sha-<commit>` |
+| tag `vX.Y.Z` | `:X.Y.Z`, `:X.Y`, `:latest`, `:stable`, `:sha-<commit>` |
+
+### Commands
+
+```bash
+scripts/release.sh patch --dry-run                    # plan only
+scripts/release.sh patch --push                       # bump + gates + tag + push
+scripts/verify-release.sh --tag v0.1.1 --registry      # post-publish proof
+ssh ubuntuvm 'docker version --format "{{.Server.Arch}}"'  # must print arm64
+```
 
 *Last verified: 2026-11-02 on `main` @ `6484ba32` (release tag `v0.1-hardened.1`, built from `3354a206`; PRs #1-#4 merged; repo secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` configured). CI green end-to-end on `main`: `backend-test` (SQLite Jest 271/271, clean exit ~59s, no `--forceExit`), `frontend-build` (build + audit 0 vulnerabilities), `security-grep`, `poc-smoke`, and `docker-trivy` (repo fs CRITICAL/HIGH + production image CRITICAL, both SARIF uploads). Both publish workflows green: `conormorris/caddymanager-{backend,frontend}:0.1.0` and `:latest` are multi-arch amd64+arm64 and mirrored to public `ghcr.io/thenukegun10x/caddymanager-revival-{backend,frontend}`. Mongo Jest 268 passed + 3 skipped; backend production audit 0 high; test Compose config and frontend/test Caddyfiles valid. Image scans had no CRITICAL findings; remaining HIGH findings are recorded in `SECURITY-SWEEP-2026-11-01.md`. Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*
+
+**Release flow (2026-11-03):** the four duplicated publish workflows were replaced by `.github/workflows/publish.yml` (channels: `:edge`/`:next`/release tags), and releases are now cut exclusively through `scripts/release.sh` with `scripts/verify-release.sh` as the gate. Verified locally on 2026-11-03: static invariants pass; registry gate confirms `0.1.0` + `latest` are amd64+arm64 and digest-identical on Docker Hub and GHCR; the dual-arch gate built and smoke-tested `backend` and `frontend` natively on amd64 (local) and arm64 (`ubuntuvm`). The first tag pushed through the new workflow is the end-to-end proof — update this line with its run ID.

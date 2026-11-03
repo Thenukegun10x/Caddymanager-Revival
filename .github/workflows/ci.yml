@@ -98,6 +98,7 @@ jobs:
             echo "::warning::C1 JWT algorithms:['HS256'] not found — verify jwt.verify"
           fi
           # C3 — no raw column interpolation in SQLite models
+          # shellcheck disable=SC2016  # the pattern is intentionally literal
           if grep -R '\${key}.*= ?' backend/repositories/* backend/models/*/*SQLiteModel.js | grep -v "ALLOWED"; then
             echo "::error::C3 raw \${key} interpolation without whitelist — check backend/repositories/*"
             FAIL=1
@@ -208,3 +209,22 @@ jobs:
           See AGENTS.md §5 for curl commands.
           POC
           echo "poc-smoke: static gate passed (live PoCs run locally via docker-compose.test.yml)"
+
+  # ── 6. Release invariants — one version, lockfiles in sync, notes exist ──
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Release script syntax
+        run: bash -n scripts/release.sh scripts/verify-release.sh scripts/lib/common.sh
+      - name: Version + changelog invariants
+        run: scripts/verify-release.sh
+      - name: Lint workflows (actionlint, digest-pinned)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
