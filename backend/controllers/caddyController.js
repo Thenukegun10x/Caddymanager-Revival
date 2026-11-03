@@ -834,10 +834,23 @@ const caddyController = {
       if (targetServerIds !== null && !Array.isArray(targetServerIds)) {
         return res.status(400).json({ success: false, message: 'serverIds must be an array' });
       }
+      if (req.body.expectedLiveDigest !== undefined &&
+          (typeof req.body.expectedLiveDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(req.body.expectedLiveDigest))) {
+        return res.status(400).json({ success: false, message: 'expectedLiveDigest must be a sha256 digest' });
+      }
+      if (req.body.expectedLiveDigest !== undefined && (!targetServerIds || targetServerIds.length !== 1)) {
+        return res.status(400).json({ success: false, message: 'expectedLiveDigest requires exactly one serverId' });
+      }
       // Applying a config to arbitrary servers must also be ownership-checked
       if (targetServerIds && !(await checkServersAccess(req, res, targetServerIds))) return;
-      
-      const result = await caddyService.applyConfigToServer(configId, targetServerIds);
+
+      // dryRun validates against every target but never writes to Caddy or the DB
+      const dryRun = req.body.dryRun === true;
+      const applyOptions = { dryRun };
+      if (req.body.expectedLiveDigest !== undefined) {
+        applyOptions.expectedLiveDigest = req.body.expectedLiveDigest;
+      }
+      const result = await caddyService.applyConfigToServer(configId, targetServerIds, applyOptions);
       
       // Log the configuration application to audit log
       await auditService.logAction({
@@ -847,9 +860,11 @@ const caddyController = {
         resourceId: configId,
         details: {
           targetServers: targetServerIds || result.serversApplied,
-          success: result.success
+          success: result.success,
+          dryRun,
+          rolledBack: result.failed.filter((failure) => failure.rolledBack).length
         },
-        statusCode: result.success ? 200 : 500,
+        statusCode: result.success ? 200 : (result.conflict ? 409 : 500),
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       });
@@ -868,7 +883,7 @@ const caddyController = {
       
       // Include the updated data in the response
       // Use appropriate status code based on result
-      res.status(result.success ? 200 : 500).json({
+      res.status(result.success ? 200 : (result.conflict ? 409 : 500)).json({
         success: result.success,
         message: result.message,
         data: {
@@ -887,6 +902,83 @@ const caddyController = {
     }
   },
   
+  /**
+   * Validate a stored configuration against one or more Caddy servers.
+   * Read-only: uses Caddy's validate_only endpoint and never applies anything.
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  validateConfigForServers: async (req, res) => {
+    try {
+      const config = await checkConfigOwnership(req, res);
+      if (!config) return;
+
+      if (!config.jsonConfig || typeof config.jsonConfig !== 'object') {
+        return res.status(400).json({
+          success: false,
+          message: 'Configuration has no JSON content to validate'
+        });
+      }
+
+      const requested = req.query.serverIds;
+      const serverIds = requested
+        ? String(requested).split(',').map((id) => id.trim()).filter(Boolean)
+        : configServerIds(config);
+
+      if (serverIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Configuration is not attached to any server; pass serverIds to validate it'
+        });
+      }
+
+      if (!(await checkServersAccess(req, res, serverIds))) return;
+
+      const results = [];
+      for (const serverId of serverIds) {
+        const server = await caddyServersRepository.findById(serverId);
+        if (!server) {
+          results.push({ serverId, valid: false, message: 'Server not found' });
+          continue;
+        }
+        try {
+          const validation = await caddyService.validateConfig(server, config.jsonConfig);
+          results.push({
+            serverId,
+            name: server.name,
+            valid: Boolean(validation.isValid),
+            message: validation.message
+          });
+        } catch (error) {
+          results.push({
+            serverId,
+            name: server.name,
+            valid: false,
+            message: error.message
+          });
+        }
+      }
+
+      const valid = results.length > 0 && results.every((result) => result.valid);
+      res.status(200).json({
+        success: true,
+        message: valid ? 'Configuration is valid' : 'Configuration failed validation',
+        data: {
+          configId: config._id || config.id,
+          name: config.name,
+          valid,
+          results
+        }
+      });
+    } catch (error) {
+      console.error('Error validating configuration:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error validating configuration'
+      });
+    }
+  },
+
   /**
    * Get the current running JSON configuration from a Caddy server
    * @param {Object} req - Express request object

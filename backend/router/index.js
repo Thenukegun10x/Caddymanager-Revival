@@ -6,6 +6,7 @@ const apiKeyRoutes = require('./apiKeyRoutes');
 const auditLogRoutes = require('./auditLogRoutes');
 const buildInfoRoutes = require('./buildInfoRoutes');
 const metricsRoutes = require('./metricsRoutes');
+const mcpRoutes = require('./mcpRoutes');
 
 const router = express.Router();
 
@@ -53,6 +54,9 @@ router.use(`${API_PREFIX}/build-info`, buildInfoRoutes);
 
 // Mount Metrics routes
 router.use(`${API_PREFIX}/metrics`, metricsRoutes);
+
+// Mount the opt-in MCP endpoint (returns 404 for every request unless enabled)
+router.use(`${API_PREFIX}/mcp`, mcpRoutes);
 
 /**
  * @swagger

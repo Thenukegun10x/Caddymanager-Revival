@@ -165,6 +165,10 @@ SQLITE_DB_PATH=./caddymanager.sqlite
 # MongoDB Configuration (used when DB_ENGINE=mongodb)
 MONGODB_URI=mongodb://<user>:<password>@localhost:27017/caddymanager?authSource=admin
 CORS_ORIGIN=http://localhost:5173
+# Opt-in MCP agent endpoint (POST /api/v1/mcp, API key auth)
+MCP_ENABLED=false
+MCP_ALLOWED_ORIGIN= # browser origins allowed to call MCP (comma-separated)
+MCP_SELF_URL=http://127.0.0.1:3000 # loopback base URL only
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
 ALLOW_PRIVATE_HOSTS= # exact private Caddy target hostnames, comma-separated
@@ -185,6 +189,9 @@ ADMIN_PASSWORD=
 - `SQLITE_DB_PATH`: Path to SQLite database file (used when `DB_ENGINE=sqlite`).
 - `MONGODB_URI`: MongoDB connection string (used when `DB_ENGINE=mongodb`).
 - `CORS_ORIGIN`: Allowed origin for frontend requests - should be the url of your frontend.
+- `MCP_ENABLED`: Set to `true` to expose the opt-in MCP agent endpoint at `POST /api/v1/mcp` (default: `false`).
+- `MCP_ALLOWED_ORIGIN`: Comma-separated browser origins allowed to call MCP. Non-browser agents send no `Origin` header. Unset means no browser origin is allowed.
+- `MCP_SELF_URL`: Loopback base URL the MCP layer uses to call the REST API with the caller's own API key (default: `http://127.0.0.1:3000`).
 - `LOG_LEVEL`: Logging verbosity.
 - `CADDY_SANDBOX_URL`: URL for the Caddy sandbox server (for testing) and/or validating configs.
 - `ALLOW_PRIVATE_HOSTS`: Exact private target hostnames explicitly trusted in production; their DNS results are still checked and metadata/link-local destinations are denied.
@@ -222,6 +229,7 @@ To switch between databases, simply change the `DB_ENGINE` environment variable 
 ## 📚 Documentation
 - [Caddy Documentation](https://caddyserver.com/docs/)
 - [CaddyManager Docs](https://caddymanager.online/#/docs)
+- [Caddy Manager MCP agent skill](./skills/caddymanager/SKILL.md) (opt-in LAN endpoint)
 - [Swagger API Docs](http://localhost:3000/api-docs) (after starting backend)
 
 ## 📈 Metrics & Prometheus

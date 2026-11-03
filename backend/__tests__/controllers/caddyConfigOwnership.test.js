@@ -13,6 +13,7 @@ jest.mock('../../services/caddyService', () => ({
   deleteConfig: jest.fn(),
   updateConfigMetadata: jest.fn(),
   updateConfigContent: jest.fn(),
+  validateConfig: jest.fn(),
   applyConfigToServer: jest.fn(),
   addConfig: jest.fn(),
   saveConfig: jest.fn(),
@@ -68,6 +69,7 @@ describe('Config ownership (C3/C7)', () => {
     app.put('/configs/:id/content', caddyController.updateConfigContent);
     app.put('/configs/:id', caddyController.updateConfigMetadata);
     app.post('/configs/:configId/apply', caddyController.applyConfig);
+    app.get('/configs/:configId/validate', caddyController.validateConfigForServers);
     app.post('/servers/:id/configs', caddyController.createConfig);
 
     jest.clearAllMocks();
@@ -78,11 +80,13 @@ describe('Config ownership (C3/C7)', () => {
     caddyService.getAllConfigs.mockResolvedValue(Object.values(CONFIGS));
     caddyService.deleteConfig.mockResolvedValue(CONFIGS['cfg-bob']);
     caddyService.updateConfigContent.mockResolvedValue(CONFIGS['cfg-bob']);
+    caddyService.validateConfig.mockResolvedValue({ isValid: true, message: 'Configuration is valid' });
     caddyService.updateConfigMetadata.mockResolvedValue(CONFIGS['cfg-bob']);
     caddyService.applyConfigToServer.mockResolvedValue({
       success: true,
       message: 'applied',
       servers: [],
+      failed: [],
       serversApplied: ['srv-alice'],
     });
     caddyService.addConfig.mockResolvedValue({ _id: 'cfg-new', name: 'new', servers: ['srv-alice'] });
@@ -198,7 +202,7 @@ describe('Config ownership (C3/C7)', () => {
         .post('/configs/cfg-alice/apply')
         .send({ serverIds: ['srv-alice'] });
       expect(response.status).toBe(200);
-      expect(caddyService.applyConfigToServer).toHaveBeenCalledWith('cfg-alice', ['srv-alice']);
+      expect(caddyService.applyConfigToServer).toHaveBeenCalledWith('cfg-alice', ['srv-alice'], { dryRun: false });
     });
 
     test('admin can apply across tenants', async () => {
@@ -207,7 +211,57 @@ describe('Config ownership (C3/C7)', () => {
         .set('x-role', 'admin')
         .send({ serverIds: ['srv-alice'] });
       expect(response.status).toBe(200);
-      expect(caddyService.applyConfigToServer).toHaveBeenCalledWith('cfg-bob', ['srv-alice']);
+      expect(caddyService.applyConfigToServer).toHaveBeenCalledWith('cfg-bob', ['srv-alice'], { dryRun: false });
+    });
+
+    test('live digest conflicts return 409 and are passed to the backend snapshot check', async () => {
+      const expectedLiveDigest = `sha256:${'0'.repeat(64)}`;
+      caddyService.applyConfigToServer.mockResolvedValueOnce({
+        success: false,
+        conflict: true,
+        message: 'Live config changed since it was read',
+        servers: [],
+        failed: [{ serverId: 'srv-alice', conflict: true }],
+        serversApplied: [],
+      });
+
+      const response = await request(app)
+        .post('/configs/cfg-alice/apply')
+        .send({ serverIds: ['srv-alice'], expectedLiveDigest });
+
+      expect(response.status).toBe(409);
+      expect(caddyService.applyConfigToServer).toHaveBeenCalledWith(
+        'cfg-alice',
+        ['srv-alice'],
+        { dryRun: false, expectedLiveDigest },
+      );
+    });
+
+    test('malformed live digests are rejected before apply', async () => {
+      const response = await request(app)
+        .post('/configs/cfg-alice/apply')
+        .send({ serverIds: ['srv-alice'], expectedLiveDigest: 'sha256:bad' });
+
+      expect(response.status).toBe(400);
+      expect(caddyService.applyConfigToServer).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('validating a config', () => {
+    test("non-admin cannot validate another user's config", async () => {
+      const response = await request(app).get('/configs/cfg-bob/validate');
+      expect(response.status).toBe(403);
+      expect(caddyService.validateConfig).not.toHaveBeenCalled();
+    });
+
+    test('non-admin can validate a config attached to their own server', async () => {
+      const response = await request(app).get('/configs/cfg-alice/validate');
+      expect(response.status).toBe(200);
+      expect(response.body.data.valid).toBe(true);
+      expect(caddyService.validateConfig).toHaveBeenCalledWith(
+        SERVERS['srv-alice'],
+        CONFIGS['cfg-alice'].jsonConfig,
+      );
     });
   });
 

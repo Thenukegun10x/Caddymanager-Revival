@@ -41,18 +41,53 @@ if (DB_ENGINE === 'mongodb') {
 }
 
 // Middleware — hardened per AGENTS.md §7 H2/H7
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : null;
-const corsOptions = {
-  origin: allowedOrigins ? (origin, cb) => {
+const splitOrigins = (value) => (value ? value.split(',').map(s => s.trim()).filter(Boolean) : []);
+const corsOrigins = splitOrigins(process.env.CORS_ORIGIN);
+const mcpOrigins = process.env.MCP_ENABLED === 'true' ? splitOrigins(process.env.MCP_ALLOWED_ORIGIN) : [];
+const apiOriginAllowlist = corsOrigins.length ? corsOrigins : null;
+const mcpOriginAllowlist = [...new Set([...corsOrigins, ...mcpOrigins])];
+// Hide MCP before CORS/preflight and body parsing when disabled, so every
+// method (including OPTIONS and malformed JSON) gets the same 404 response.
+app.use('/api/v1/mcp', (req, res, next) => {
+  if (process.env.MCP_ENABLED !== 'true') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+  return next();
+});
+const makeCorsOptions = (origins) => ({
+  origin: origins.length ? (origin, cb) => {
     if (!origin) return cb(null, true); // same-origin / curl
-    if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (origins.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   } : false,
-  credentials: !!allowedOrigins,
+  credentials: origins.length > 0,
   methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-API-Key']
-};
-app.use(cors(corsOptions));
+  allowedHeaders: ['Content-Type','Authorization','X-API-Key','Mcp-Session-Id','MCP-Protocol-Version']
+});
+const apiCors = cors(makeCorsOptions(apiOriginAllowlist || []));
+const mcpCors = cors(makeCorsOptions(mcpOriginAllowlist));
+// MCP may have a separate browser origin, but don't add it to the CORS policy
+// for cookie-authenticated REST routes. MCP's own checkOrigin gate is stricter
+// still and accepts only MCP_ALLOWED_ORIGIN.
+app.use((req, res, next) => {
+  const pathname = (req.originalUrl || '').split('?')[0];
+  const middleware = pathname === '/api/v1/mcp' || pathname.startsWith('/api/v1/mcp/')
+    ? mcpCors
+    : apiCors;
+  return middleware(req, res, next);
+});
+// The MCP transport is stateless POST-only. Keep non-POST methods from reaching
+// body parsers (CORS OPTIONS has already been handled above).
+app.use('/api/v1/mcp', (req, res, next) => {
+  if (req.method !== 'POST') {
+    res.set('Allow', 'POST');
+    return res.status(405).json({
+      success: false,
+      message: 'MCP endpoint accepts POST only',
+    });
+  }
+  return next();
+});
 app.use(cookieParser());
 app.use(helmet({ contentSecurityPolicy: false, hsts: { maxAge: 31536000, includeSubDomains: true } }));
 // Never echo internal error detail from production responses (H6)
@@ -80,12 +115,48 @@ const apiLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    const pathname = (req.originalUrl || '').split('?')[0];
+    return isTest || pathname === '/api/v1/mcp' || pathname.startsWith('/api/v1/mcp/');
+  }
+});
+// Agent traffic is chatty but bursty; give MCP its own bucket instead of
+// letting a few tool loops exhaust the 300/15min API allowance.
+const mcpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Too many MCP requests' } },
   skip: () => isTest
 });
 app.use('/api/v1/auth/login', loginLimiter);
 app.use('/api/v1/caddy/test-connection', testConnLimiter);
+app.use('/api/v1/mcp', mcpLimiter);
 app.use('/api/v1/', apiLimiter);
+// MCP payloads can legitimately be larger than the rest of the API (a full JSON
+// config or a patch set), so it gets its own parser before the 200kb default.
+app.use('/api/v1/mcp', express.json({ limit: '1mb' }));
 app.use(express.json({ limit: '200kb' }));
+// Keep parser failures on the MCP transport in JSON-RPC shape instead of
+// leaking Express's parser response format into the protocol.
+app.use('/api/v1/mcp', (err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32700, message: 'Parse error' },
+    });
+  }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: 'Request body too large' },
+    });
+  }
+  return next(err);
+});
 app.use(express.text({ limit: '512kb', type: 'text/plain' }));
 // No express.urlencoded: the API is JSON/text only (M1, smaller parser surface)
 // Only log requests in explicit development mode (L1)

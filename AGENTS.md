@@ -31,6 +31,7 @@ docker-compose.yml     pull Docker Hub conormorris/* (prod-like, hardened tag pi
 docker-compose.build.yml  build from ./backend, ./frontend (dev)
 docker-compose.test.yml   edge caddy + isolated networks (test, see §3)
 test/Caddyfile.edge    edge reverse_proxy frontend:80
+skills/caddymanager/SKILL.md  agent guide for the opt-in MCP surface
 PLAN.md / NOTICE.md / SECURITY.md  hardened fork docs
 ```
 
@@ -132,6 +133,9 @@ MONGODB_URI= # full URI from your secrets manager; no credentials in compose
 MONGO_USERNAME=mongoadmin # only for docker-compose.mongodb.yml
 MONGO_PASSWORD= # REQUIRED by that overlay (12+ chars, openssl rand -hex 24)
 CORS_ORIGIN=http://localhost:5173,http://localhost:80
+MCP_ENABLED=false # opt-in POST /api/v1/mcp agent surface
+MCP_ALLOWED_ORIGIN= # exact comma-separated browser origins; empty blocks browsers
+MCP_SELF_URL=http://127.0.0.1:3000 # loopback only; key is forwarded to this API
 LOG_LEVEL=debug
 CADDY_SANDBOX_URL=http://localhost:2019
 PING_INTERVAL=30000
@@ -332,3 +336,49 @@ ssh ubuntuvm 'docker version --format "{{.Server.Arch}}"'  # must print arm64
 *Last verified: 2026-11-02 on `main` @ `6484ba32` (release tag `v0.1-hardened.1`, built from `3354a206`; PRs #1-#4 merged; repo secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` configured). CI green end-to-end on `main`: `backend-test` (SQLite Jest 271/271, clean exit ~59s, no `--forceExit`), `frontend-build` (build + audit 0 vulnerabilities), `security-grep`, `poc-smoke`, and `docker-trivy` (repo fs CRITICAL/HIGH + production image CRITICAL, both SARIF uploads). Both publish workflows green: `conormorris/caddymanager-{backend,frontend}:0.1.0` and `:latest` are multi-arch amd64+arm64 and mirrored to public `ghcr.io/thenukegun10x/caddymanager-revival-{backend,frontend}`. Mongo Jest 268 passed + 3 skipped; backend production audit 0 high; test Compose config and frontend/test Caddyfiles valid. Image scans had no CRITICAL findings; remaining HIGH findings are recorded in `SECURITY-SWEEP-2026-11-01.md`. Includes M4 logout revocation, M5 no `unsafe-eval`/HTTP HSTS, M7 verifiable audit chain, and M9 exact production private-host allowlist. Keep this file updated with every docker-compose or env change.*
 
 **Release flow (2026-11-03):** the four duplicated publish workflows were replaced by `.github/workflows/publish.yml` (channels: `:edge`/`:next`/release tags), and releases are now cut exclusively through `scripts/release.sh` with `scripts/verify-release.sh` as the gate. Verified locally on 2026-11-03: static invariants pass; registry gate confirms `0.1.0` + `latest` are amd64+arm64 and digest-identical on Docker Hub and GHCR; the dual-arch gate built and smoke-tested `backend` and `frontend` natively on amd64 (local) and arm64 (`ubuntuvm`). The first tag pushed through the new workflow is the end-to-end proof — update this line with its run ID.
+
+---
+
+## 11. MCP Agent Surface — Rules
+
+Opt-in MCP server for agents, implemented in `backend/services/mcpService.js`
+and `backend/router/mcpRoutes.js`, with the client guide in
+[`skills/caddymanager/SKILL.md`](./skills/caddymanager/SKILL.md).
+
+- **Off by default.** `MCP_ENABLED=true` is required; otherwise every request gets
+  a plain `404 Not found` and no auth work is done. Do not add a default-on path.
+- **API keys only, `Authorization: Bearer <key>`.** JWTs are rejected by shape
+  before the key store is consulted. The loopback client re-sends the key as
+  `x-api-key` so the REST layer never has to accept API keys in `Bearer`.
+- **Two gates, in order:** `checkOrigin` (`MCP_ALLOWED_ORIGIN`, browser requests)
+  then `protectMcp` (feature flag, key, active user). `MCP_ALLOWED_ORIGIN` is
+  added only to the MCP path's CORS allowlist while enabled; never widen CORS
+  for the rest of the cookie-authenticated REST API.
+- **No duplicate authorization.** Every tool proxies to the REST API with the
+  caller's key (`MCP_SELF_URL`, default `http://127.0.0.1:${PORT}`), so RBAC,
+  ownership, SSRF policy and audit logging stay in one place. Never query the
+  repositories directly from `mcpService`.
+- **Read tools need `read`; mutations need `write`.** `patch_config` also needs
+  `read` because it reads the saved document before its write. Checked per tool
+  in `handleToolCall` (`hasPermission`). Keys without permission get a tool
+  result with `isError: true` and `MCP_FORBIDDEN`.
+- **Patch only if it parses.** `utils/jsonPatch.js` is the only mutator. It
+  rejects non-object results, unknown pointers, unsupported ops, >100 ops, and
+  `__proto__`/`constructor`/`prototype` segments. Do not bypass `applyPatch`.
+- **Snapshot + rollback are backend-owned.** `caddyService.applyConfigToServer`
+  reads the live config before POSTing. An unreadable snapshot aborts the apply;
+  a rejected POST re-posts the snapshot and records `rolledBack`,
+  `rollbackFailed` and (if needed) `rollbackError` in `results.failed`. Do not
+  move this into the MCP layer or the frontend.
+- **`dryRun` never mutates.** It validates only: no POST to Caddy, no config
+  status/history changes, no server `activeConfig` change.
+- **`apply_config` requires `confirm=true`** unless `dryRun=true`.
+  `expectedLiveDigest` (single server) fails closed with `MCP_CONFLICT`.
+- **Loopback only.** `MCP_SELF_URL` is operator-controlled and must stay on
+  loopback; never accept a user-supplied base URL in a tool argument.
+- **Audit mutations.** `mcp_patch_config`, `mcp_save_config` and
+  `mcp_apply_config` are written to the audit log with `via: 'mcp'`, never with
+  config contents.
+- **Tests:** `backend/__tests__/utils/jsonPatch.test.js`,
+  `backend/__tests__/mcp/*` and
+  `backend/__tests__/services/caddyServiceRollback.test.js` must stay green.
